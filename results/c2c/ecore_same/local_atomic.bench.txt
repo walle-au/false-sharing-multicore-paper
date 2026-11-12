@@ -1,0 +1,2 @@
+layout=local hilos=4 stride=8 rmw=atomic cpus=8,9,10,11 iters=50000000 memoria=32 B
+  rep 0: 0.0171 s  0.342 ns/inc  11681.3 Mops/s

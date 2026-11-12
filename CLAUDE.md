@@ -75,8 +75,10 @@ y el enfoque del experimento todavía pueden cambiar.
 | `paper/paper.pdf` | Compilación vieja (desactualizada) |
 | `benchmarks/fs.c` | Benchmark: contadores juntos (8 B) vs separados (64 B), 1–6 hilos, `volatile ++` |
 | `benchmarks/fs_atomic.c` | Igual, pero con incremento atómico (`__atomic_fetch_add`). Reemplazados por `fs_bench.c` |
-| `benchmarks/fs_bench.c` | Benchmark unificado: `-l packed/padded/local/shared`, `-n` hilos, `-s` stride, `--rmw atomic/volatile`, `--cpus` para fijar hilos, `-r` repeticiones, `--csv`. `run_bench.sh` barre P-cores, E-cores mismo cluster (8-11) y E-cores entre clusters; `record_c2c.sh` graba perf c2c por layout |
+| `benchmarks/fs_bench.c` | Benchmark unificado: `-l packed/padded/local/shared`, `-n` hilos, `-s` stride, `--rmw atomic/volatile`, `--cpus` para fijar hilos, `-r` repeticiones, `--csv`. `run_bench.sh` barre P-cores, E-cores mismo cluster (8-11) y E-cores entre clusters; `record_c2c.sh [pcore|ecore_same|ecore_cross]` graba perf c2c por layout en `results/c2c/<grupo>/` |
 | `docs/Proyectos_Guia_temas_paper_ADC1_2026.pdf` | Guía oficial de temas y fechas |
+| `analysis/plots.py` | Genera `paper/figures/fig_scaling.pdf` y `fig_slowdown.pdf` (+ PNG) desde `bench.csv` y el simulador (`python3 analysis/plots.py`) |
+| `analysis/summarize.py` | Resume `results/hw/bench.csv` (media, sd, CV, razones, ajuste lineal) y escribe `results/hw/summary.csv` |
 | `sim/mesi_sim.c` | Simulador MESI propio (N núcleos, bus snooping, layouts packed/padded/local/shared, prefetch adyacente). `make && ./sweep.sh` genera CSV en `results/sim/` |
 
 **Compilar el paper en Linux** (requiere `texlive-publishers` o
@@ -188,3 +190,33 @@ cd paper && pdflatex paper && bibtex paper && pdflatex paper && pdflatex paper
 - [x] Ajustar el abstract al procesador y la metodología finales.
 - [ ] Compilar y revisar el PDF.
 - [ ] Subir `paper.tex`, `references.bib` y `paper.pdf` a Tec Digital.
+
+## Resultados medidos (12 nov 2026, `results/hw/bench.csv`)
+
+Barrido completo: 120 configuraciones × 10 repeticiones, governor `performance`,
+kernel 7.0.0-42, gcc 13.3. Resumen con `python3 analysis/summarize.py`.
+
+- **atomic, packed vs padded64 con 4 hilos:** 8.4× (P-cores), 9.2× (E-cores
+  mismo cluster), 11.6× (E-cores entre clusters). Con 1 hilo no hay diferencia.
+- **lock add sin competencia:** 3.87 ns en P (≈18 ciclos a 4.7 GHz) y 5.32 ns en
+  E (≈18 ciclos a 3.4 GHz).
+- **Costo por transferencia de la línea** (ajuste ns = n·t, error ±7 %):
+  P-cores 10.0 ns (≈47 ciclos, vía L3); E mismo cluster 12.3 ns (≈42 ciclos,
+  L2 compartida); E entre clusters 14.8 ns (≈50 ciclos, vía L3).
+- **volatile:** en P-cores el false sharing casi no se nota (1.15×); en E-cores sí
+  (3.8–5.5×). En P-cores un hilo hace ~1 incremento/ciclo.
+- **perf c2c (P-cores, 4 hilos):** packed atomic 18 631 HITM en una línea con
+  offsets 0x0/0x8/0x10/0x18; padded y local 0; **packed volatile 0 HITM** (la
+  herramienta no lo ve).
+- **perf c2c en E-cores (4 hilos, packed atomic):** la línea correcta sale en
+  el primer lugar (100 % de los HITM), pero con solo 54 HITM (mismo cluster) y
+  293 (entre clusters) frente a 18 631 en P-cores, con el mismo daño. En E-cores
+  casi no se muestrean loads (165 vs 44 634) y los `lock add` aparecen como
+  stores; los stores en Intel solo reportan L1 hit/miss, no HITM. Hipótesis por
+  confirmar. Consecuencia: c2c ordena por HITM, así que en un programa real esa
+  línea podría quedar enterrada.
+- **Padding 128 B:** sin beneficio frente a 64 B en ningún grupo.
+- **packed vs shared:** casi iguales; con 2 P-cores packed es más lento (21.6 vs
+  15.4 ns).
+- **shared + volatile:** pierde actualizaciones (esperado, carrera de datos).
+- Simulador calibrado con `--lat-atomic 18 --lat-hitm 47` (P-cores).

@@ -202,41 +202,62 @@ every result can be traced to a protocol event:
 The simulator counts hits, misses, bus transactions, invalidations,
 cache-to-cache transfers from a modified line (the analogue of a HITM),
 write-backs, and the memory occupied by the counters. Latencies are model
-parameters, not measurements (Table~\ref{tab:latencies}); their values are
-estimates and a sensitivity sweep is reported.
+parameters (Table~\ref{tab:latencies}); a sensitivity sweep over the HITM
+latency is also reported.
 
 \begin{table}[!t]
-\caption{Simulator Latency Parameters (Estimates, in Cycles)}
+\caption{Simulator Latency Parameters (Cycles at 4.7\,GHz)}
 \label{tab:latencies}
 \centering
-\begin{tabular}{@{}lr@{}}
+\begin{tabular}{@{}lrl@{}}
 \toprule
-\textbf{Event} & \textbf{Cycles} \\
+\textbf{Event} & \textbf{Cycles} & \textbf{Origin} \\
 \midrule
-Private cache hit & 4 \\
-Data from LLC / clean copy & 40 \\
-Data from a modified line in another core (HITM) & 70 \\
-Main memory & 200 \\
-Upgrade (S$\rightarrow$M, invalidation only) & 30 \\
+Private cache hit & 4 & assumed \\
+Locked RMW, line already owned & 18 & calibrated \\
+Data from a modified line (HITM) & 47 & calibrated \\
+Data from LLC / clean copy & 40 & assumed \\
+Main memory & 200 & assumed \\
+Upgrade (S$\rightarrow$M) & 30 & assumed \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\todo{Justificar los valores de latencia con alguna fuente o con la medicion
-propia (p. ej. derivar la latencia HITM del experimento real) y aclarar que el
-bus serializado es una simplificacion: el i7-1260P usa un ring y una L3
-compartida.}
+The two parameters that dominate the workload were calibrated from our own
+measurements on the P-cores (Section~\ref{sec:results}): the cost of an
+uncontended locked increment (padded layout, one thread, 3.87\,ns) and the
+cost of one line transfer, taken from the slope of the packed layout with four
+threads (about 10\,ns per transfer). The remaining values are rough estimates;
+they barely affect this workload because, after warm-up, it never misses to
+the LLC or to memory. Note that calibrating with data from the same platform
+means that agreement at those two points is not an independent validation;
+only the predictions for other thread counts and layouts are.
+
+\todo{Aclarar que el bus serializado es una simplificacion: el i7-1260P usa un
+ring y una L3 compartida. Explicar por que aun asi el modelo predice el
+crecimiento lineal (la linea disputada es una sola: solo un nucleo puede
+tenerla en M a la vez).}
 
 Four sweeps are run (\texttt{sim/sweep.sh}): (i) scaling with $N$ for each
 layout; (ii) line size versus counter stride; (iii) adjacent-line prefetch with
 64-byte and 128-byte padding; and (iv) sensitivity to the HITM latency.
 
 \subsection{Hardware Experiment}
-\todo{Plataforma: Intel Core i7-1260P, 4 P-cores (HT) + 8 E-cores, L3 18 MiB,
-Linux \todo{kernel}. Hilos fijados con \texttt{taskset -c 0,2,4,6} (un hilo por
-nucleo fisico). Compilador y flags. Numero de repeticiones, media y desviacion.
-Grabacion con \texttt{perf c2c record} por layout. Opcional: E-cores de un
-mismo cluster (L2 compartida).}
+The experiment runs on an Intel Core i7-1260P (Alder Lake) with four
+performance cores (P-cores, two hardware threads each, private 1.25\,MiB L2,
+up to 4.7\,GHz), eight efficiency cores (E-cores, up to 3.4\,GHz, organized in
+two clusters of four that share a 2\,MiB L2) and an 18\,MiB L3 shared by all cores,
+under Linux 7.0 with the \texttt{performance} frequency governor. The
+benchmark (\texttt{benchmarks/fs\_bench.c}, compiled with GCC 13.3 at
+\texttt{-O2}) implements the four layouts of the simulator, with either a
+locked increment (\texttt{\_\_atomic\_fetch\_add}, which compiles to
+\texttt{lock add}) or a plain \texttt{volatile} increment. Each thread is pinned
+to one core, and three groups of cores are compared: one thread per physical
+P-core (CPUs 0, 2, 4, 6), four E-cores of one cluster (8--11), and E-cores
+split across both clusters (8, 12, 9, 13). Each configuration performs
+$5\times10^{7}$ increments per thread and is repeated ten times after one
+warm-up run. Contended lines are recorded with \texttt{perf c2c record} for
+each layout and core group.
 
 % =====================================================================
 \section{Results}
@@ -245,18 +266,116 @@ mismo cluster (L2 compartida).}
 % Separar siempre: (A) simulado, (B) medido, (C) comparacion.
 
 \subsection{Simulation}
-\todo{Figura: ciclos por incremento vs. $N$ para los cuatro layouts
-(\texttt{results/sim/scaling.csv}). Tabla: linea vs. stride
-(\texttt{line\_vs\_stride.csv}). Resultado del prefetch
-(\texttt{prefetch.csv}). Sensibilidad (\texttt{hitm\_sensitivity.csv}).}
+Table~\ref{tab:simline} shows the simulated cost of an increment with four
+threads as a function of the cache-line size and the distance between
+counters. The result is binary: whenever two counters fall in the same line,
+every increment pays a line transfer; as soon as the distance reaches the line
+size, the cost drops to that of an uncontended locked increment. The boundary
+moves with the line size, which reproduces in our model the argument of
+Torrellas et~al.~\cite{torrellas1994false} that longer lines increase false
+sharing.
+
+\begin{table}[!t]
+\caption{Simulated ns per Increment, 4 Threads (Packed Counters at Distance $d$)}
+\label{tab:simline}
+\centering
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{6}{c}{\textbf{Distance between counters $d$ (bytes)}} \\
+\cmidrule(l){2-7}
+\textbf{Line} & 8 & 16 & 32 & 64 & 128 & 256 \\
+\midrule
+32\,B  & 40.0 & 40.0 & 4.1 & 4.1 & 4.1 & 4.1 \\
+64\,B  & 40.0 & 40.0 & 40.0 & 4.1 & 4.1 & 4.1 \\
+128\,B & 40.0 & 40.0 & 40.0 & 40.0 & 4.1 & 4.1 \\
+256\,B & 40.0 & 40.0 & 40.0 & 40.0 & 40.0 & 4.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+With the adjacent-line prefetch enabled and 64-byte padding, the simulator
+records only one to four prefetch-induced HITM events per run (for 2 to 8
+threads), all during warm-up. Once each core owns its line in the M state it
+never misses again, so the prefetcher is never triggered.
+\todo{Mencionar el barrido de sensibilidad (\texttt{hitm\_sensitivity.csv}):
+el costo de packed escala linealmente con la latencia HITM supuesta.}
 
 \subsection{Measurements on the i7-1260P}
-\todo{Tiempo vs. hilos por layout (media $\pm$ desviacion), speedup, HITM de
-perf c2c por layout con los offsets de cada hilo.}
+Fig.~\ref{fig:scaling} shows the cost per increment for each layout and core
+group with locked increments. With one thread all layouts except local cost
+the same (3.87\,ns on P-cores, 5.32\,ns on E-cores; about 18 cycles in both
+cases). With two or more threads, the packed and shared layouts grow roughly
+linearly with the thread count, while padded remains almost flat. With four
+threads, packed is $8.4\times$ slower than padded on P-cores, $9.2\times$ on
+E-cores sharing an L2, and $11.6\times$ on E-cores in different clusters
+(Fig.~\ref{fig:slowdown}). Padding to 128 bytes was within 4\% of 64-byte
+padding in every configuration and is omitted from the figure. All
+configurations were repeated ten times; the coefficient of variation was below
+2\% except for the local layout, whose runs last only a few milliseconds.
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_scaling.pdf}
+\caption{Cost per locked increment versus thread count on the i7-1260P (mean
+of 10 runs; error bars show one standard deviation, mostly smaller than the
+markers). Each panel pins the threads to a different group of cores. The dotted
+line is the prediction of our MESI simulator for the packed layout, using the
+line-transfer latency calibrated for each group (Table~\ref{tab:latencies}).}
+\label{fig:scaling}
+\end{figure*}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_slowdown.pdf}
+\caption{Slowdown of the packed layout relative to 64-byte padding with four
+threads, for locked (\texttt{lock add}) and plain \texttt{volatile} increments.}
+\label{fig:slowdown}
+\end{figure}
+
+The type of increment changes the picture. With plain \texttt{volatile}
+increments (a load, an add and a store, without \texttt{lock}), the packed
+layout is only $1.15\times$ slower than padded on P-cores, but $3.8\times$ to
+$5.5\times$ slower on E-cores (Fig.~\ref{fig:slowdown}). On a P-core a single
+thread completes about one \texttt{volatile} increment per cycle.
+
+Table~\ref{tab:c2c} summarizes the \texttt{perf c2c} recordings. On P-cores,
+the tool reports one contended line with 18\,631 HITM samples and shows each
+thread writing at a different offset (0x0, 0x8, 0x10, 0x18), exactly the
+pattern described by Mario~\cite{mario2016c2c}. Padded and local layouts
+produce no HITM. However, the same packed workload on E-cores yields only 54
+and 293 HITM samples, and the \texttt{volatile} packed layout yields almost
+none on any group.
+
+\begin{table}[!t]
+\caption{HITM Samples Reported by \texttt{perf c2c}, 4 Threads}
+\label{tab:c2c}
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Layout} & \textbf{P-cores} & \textbf{E same} & \textbf{E cross} \\
+\midrule
+packed, atomic   & 18\,631 & 54  & 293 \\
+shared, atomic   & 12\,951 & 186 & 97 \\
+padded, atomic   & 0       & 0   & 1 \\
+local            & 0       & 0   & 0 \\
+packed, volatile & 0       & 0   & 20 \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Measured slowdown, packed vs.\ padded (atomic)}} \\
+& $8.4\times$ & $9.2\times$ & $11.6\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Simulation vs.\ Hardware}
-\todo{Donde coinciden y donde no. Las diferencias son material para la
-discusion.}
+After calibrating two parameters per core group, the simulator predicts the
+packed layout within $\pm7\%$ for two to four threads in all three groups
+(Fig.~\ref{fig:scaling}). The fitted line-transfer cost is 47 cycles on
+P-cores, 42 cycles between E-cores sharing an L2, and 50 cycles between
+E-core clusters. The model fails in two places: it predicts that packed and
+shared cost the same, whereas on two P-cores packed is 40\% slower than shared
+(21.6 vs.\ 15.4\,ns); and, since it has no store buffer, it cannot reproduce the
+near absence of false sharing for \texttt{volatile} increments on P-cores.
+\todo{Explicar las dos discrepancias en la Discusion.}
 
 % =====================================================================
 \section{Discussion}

@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # Graba perf c2c para cada layout (requiere sudo o perf_event_paranoid <= 0).
-# Uso: sudo ./record_c2c.sh
+# Uso: sudo ./record_c2c.sh                 (P-cores 0,2,4,6)
+#      sudo ./record_c2c.sh ecore_same      (E-cores 8-11, L2 compartida)
+#      sudo ./record_c2c.sh ecore_cross     (E-cores 8,12,9,13)
+# Cada grupo se guarda en ../results/c2c/<grupo>/
 set -euo pipefail
 cd "$(dirname "$0")"
 make -s fs_bench
-OUT=../results/c2c; mkdir -p "$OUT"
-CPUS=${CPUS:-0,2,4,6}
+GROUP=${1:-pcore}
+case "$GROUP" in
+  pcore)       CPUS=0,2,4,6 ;;
+  ecore_same)  CPUS=8,9,10,11 ;;
+  ecore_cross) CPUS=8,12,9,13 ;;
+  *) echo "grupo desconocido: $GROUP (pcore | ecore_same | ecore_cross)"; exit 1 ;;
+esac
+OUT=../results/c2c/$GROUP; mkdir -p "$OUT"
+echo "grupo $GROUP, CPUs $CPUS -> $OUT"
 ITERS=${ITERS:-50000000}
 
 for layout in packed padded local shared; do
@@ -20,5 +30,5 @@ for layout in packed padded local shared; do
   done
 done
 # los .data son grandes y no se suben al repo; los reportes de texto si
-chown -R "${SUDO_USER:-$USER}" "$OUT" 2>/dev/null || true
+chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" ../results/c2c 2>/dev/null || true
 echo "Reportes en $OUT/*.report.txt"

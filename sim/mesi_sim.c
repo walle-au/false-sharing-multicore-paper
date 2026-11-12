@@ -12,7 +12,7 @@
  * Carga de trabajo: cada hilo incrementa ITERS veces "su" contador.
  *   packed  : contadores contiguos (stride 8 B)      -> false sharing
  *   padded  : contadores separados por --stride B    -> sin false sharing si stride >= linea
- *   local   : acumulacion en una variable privada y una sola escritura al final
+ *   local   : acumulacion en un registro y una sola escritura al final
  *   shared  : todos incrementan EL MISMO contador    -> true sharing (referencia)
  *
  * Uso:  ./mesi_sim --help
@@ -52,6 +52,8 @@ typedef struct {
     unsigned seed;
     /* latencias del modelo (ciclos) */
     int lat_hit, lat_llc, lat_hitm, lat_mem, lat_upgr;
+    int lat_atomic;        /* costo minimo de un RMW con lock aunque la linea ya este en M */
+    double ghz;            /* solo para convertir ciclos a ns en la salida */
     int csv, header, verbose;
 } Config;
 
@@ -258,8 +260,6 @@ static uint32_t xs(uint32_t *s) { uint32_t x = *s; x ^= x << 13; x ^= x >> 17; x
 /* Carga de trabajo                                                    */
 /* ------------------------------------------------------------------ */
 #define BASE_ADDR   0x100000ULL
-#define STACK_BASE  0x800000ULL
-#define STACK_GAP   0x10000ULL     /* pilas de hilos separadas 64 KiB */
 
 static uint64_t counter_addr(int t) {
     uint64_t base = BASE_ADDR + (uint64_t)C.offset;
@@ -276,7 +276,7 @@ static uint64_t footprint_bytes(void) {
     switch (C.layout) {
     case L_PACKED: return (uint64_t)C.cores * 8;
     case L_PADDED: return (uint64_t)C.cores * (uint64_t)C.stride;
-    case L_LOCAL:  return (uint64_t)C.cores * 8 * 2;   /* arreglo final + variable local */
+    case L_LOCAL:  return (uint64_t)C.cores * 8;       /* solo el arreglo final */
     case L_SHARED: return 8;
     }
     return 0;
@@ -292,12 +292,18 @@ static uint64_t lines_touched(void) {
 /* Un paso (una iteracion) del hilo t. Devuelve su nuevo reloj. */
 static uint64_t step(int t, uint64_t now) {
     uint64_t a = counter_addr(t);
-    if (C.layout == L_LOCAL) a = STACK_BASE + (uint64_t)t * STACK_GAP;
-    if (C.rmw == RMW_LOADSTORE || C.layout == L_LOCAL) {
+    if (C.layout == L_LOCAL) {
+        /* El acumulador vive en un registro (asi lo compila fs_bench.c):
+         * no hay acceso a memoria por iteracion, solo el volcado final. */
+    } else if (C.rmw == RMW_LOADSTORE) {
         now = do_read(t, a, now);
         now = do_write(t, a, now);
     } else {
-        now = do_write(t, a, now);         /* lock add: RFO + escritura */
+        /* lock add: RFO + escritura. Un RMW con lock no baja de lat_atomic
+         * ciclos (drena el store buffer y se serializa), aunque sea un hit. */
+        uint64_t before = now;
+        now = do_write(t, a, now);
+        if (now - before < (uint64_t)C.lat_atomic) now = before + (uint64_t)C.lat_atomic;
     }
     now += (uint64_t)C.work;
     if (C.jitter) now += xs(&rng[t]) % (uint32_t)(C.jitter + 1);
@@ -344,7 +350,9 @@ static void usage(const char *p) {
 "      --jitter C       ruido por iteracion [0..C]        [0]\n"
 "      --seed S         semilla del jitter                [1]\n"
 "      --lat-hit/--lat-llc/--lat-hitm/--lat-mem/--lat-upgr C\n"
-"                       latencias del modelo     [4/40/70/200/30]\n"
+"                       latencias del modelo     [4/40/47/200/30]\n"
+"      --lat-atomic C   costo minimo de un lock RMW       [18]\n"
+"      --ghz F          frecuencia para convertir a ns    [4.7]\n"
 "      --csv            salida en una linea CSV\n"
 "      --header         imprime la cabecera CSV y termina\n"
 "  -v, --verbose        estadisticas por nucleo\n", p, MAXCORES);
@@ -353,15 +361,16 @@ static void usage(const char *p) {
 static const char *CSV_HEADER =
     "layout,cores,line,stride,rmw,prefetch,iters,makespan,cycles_per_op,"
     "accesses,hits,misses,bus_rd,bus_rdx,bus_upgr,invalidations,hitm,c2c_clean,"
-    "mem_reads,writebacks,pf_issued,pf_hitm,footprint_bytes,lines_touched";
+    "mem_reads,writebacks,pf_issued,pf_hitm,footprint_bytes,lines_touched,ns_per_op";
 
 int main(int argc, char **argv) {
     C = (Config){ .cores = 4, .line = 64, .cache_kib = 48, .ways = 12,
                   .layout = L_PACKED, .stride = 64, .offset = 0, .iters = 100000,
                   .rmw = RMW_ATOMIC, .prefetch = 0, .work = 1, .jitter = 0, .seed = 1,
-                  .lat_hit = 4, .lat_llc = 40, .lat_hitm = 70, .lat_mem = 200, .lat_upgr = 30 };
+                  .lat_hit = 4, .lat_llc = 40, .lat_hitm = 47, .lat_mem = 200, .lat_upgr = 30,
+                  .lat_atomic = 18, .ghz = 4.7 };
     enum { O_OFF = 1000, O_KIB, O_WAYS, O_WORK, O_JIT, O_SEED,
-           O_LHIT, O_LLLC, O_LHITM, O_LMEM, O_LUPG, O_CSV, O_HDR };
+           O_LHIT, O_LLLC, O_LHITM, O_LMEM, O_LUPG, O_LATM, O_GHZ, O_CSV, O_HDR };
     static struct option lo[] = {
         {"cores", 1, 0, 'n'}, {"layout", 1, 0, 'l'}, {"stride", 1, 0, 's'},
         {"line", 1, 0, 'L'}, {"iters", 1, 0, 'i'}, {"rmw", 1, 0, 'r'},
@@ -370,6 +379,7 @@ int main(int argc, char **argv) {
         {"work", 1, 0, O_WORK}, {"jitter", 1, 0, O_JIT}, {"seed", 1, 0, O_SEED},
         {"lat-hit", 1, 0, O_LHIT}, {"lat-llc", 1, 0, O_LLLC}, {"lat-hitm", 1, 0, O_LHITM},
         {"lat-mem", 1, 0, O_LMEM}, {"lat-upgr", 1, 0, O_LUPG},
+        {"lat-atomic", 1, 0, O_LATM}, {"ghz", 1, 0, O_GHZ},
         {"csv", 0, 0, O_CSV}, {"header", 0, 0, O_HDR}, {0, 0, 0, 0}
     };
     int o;
@@ -404,6 +414,8 @@ int main(int argc, char **argv) {
         case O_LHITM: C.lat_hitm = atoi(optarg); break;
         case O_LMEM: C.lat_mem = atoi(optarg); break;
         case O_LUPG: C.lat_upgr = atoi(optarg); break;
+        case O_LATM: C.lat_atomic = atoi(optarg); break;
+        case O_GHZ:  C.ghz = atof(optarg); break;
         case O_CSV:  C.csv = 1; break;
         case O_HDR:  puts(CSV_HEADER); return 0;
         case 'h': usage(argv[0]); return 0;
@@ -420,7 +432,7 @@ int main(int argc, char **argv) {
     double cpo = (double)mk / (double)C.iters;   /* ciclos por incremento, por hilo */
 
     if (C.csv) {
-        printf("%s,%d,%d,%d,%s,%d,%llu,%llu,%.3f,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+        printf("%s,%d,%d,%d,%s,%d,%llu,%llu,%.3f,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.3f\n",
                LAYOUT_NAME[C.layout], C.cores, C.line, C.layout == L_PADDED ? C.stride : 8,
                C.rmw == RMW_ATOMIC ? "atomic" : "loadstore", C.prefetch,
                (unsigned long long)C.iters, (unsigned long long)mk, cpo,
@@ -429,13 +441,14 @@ int main(int argc, char **argv) {
                (unsigned long long)G.invalidations, (unsigned long long)G.hitm, (unsigned long long)G.c2c_clean,
                (unsigned long long)G.mem_reads, (unsigned long long)G.writebacks,
                (unsigned long long)G.pf_issued, (unsigned long long)G.pf_hitm,
-               (unsigned long long)footprint_bytes(), (unsigned long long)lines_touched());
+               (unsigned long long)footprint_bytes(), (unsigned long long)lines_touched(), cpo / C.ghz);
     } else {
         printf("Layout %-7s | %d nucleos | linea %d B | stride %d B | %s | prefetch %s\n",
                LAYOUT_NAME[C.layout], C.cores, C.line, C.layout == L_PADDED ? C.stride : 8,
                C.rmw == RMW_ATOMIC ? "atomic" : "loadstore", C.prefetch ? "on" : "off");
         printf("  incrementos totales : %llu (%llu por hilo)\n", (unsigned long long)ops, (unsigned long long)C.iters);
-        printf("  makespan (estimado) : %llu ciclos  (%.2f ciclos/incremento por hilo)\n", (unsigned long long)mk, cpo);
+        printf("  makespan (estimado) : %llu ciclos  (%.2f ciclos/incremento por hilo = %.2f ns a %.1f GHz)\n",
+               (unsigned long long)mk, cpo, cpo / C.ghz, C.ghz);
         printf("  accesos / hits / miss: %llu / %llu / %llu\n",
                (unsigned long long)G.accesses, (unsigned long long)G.hits, (unsigned long long)G.misses);
         printf("  BusRd / BusRdX / BusUpgr: %llu / %llu / %llu\n",

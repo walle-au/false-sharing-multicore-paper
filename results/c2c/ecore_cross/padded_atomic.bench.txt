@@ -1,0 +1,2 @@
+layout=padded hilos=4 stride=64 rmw=atomic cpus=8,12,9,13 iters=50000000 memoria=256 B
+  rep 0: 0.2677 s  5.354 ns/inc  747.2 Mops/s

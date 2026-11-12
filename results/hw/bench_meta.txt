@@ -1,0 +1,9 @@
+2026-11-12T13:56:04-06:00
+7.0.0-42-generic
+Model name:                              12th Gen Intel(R) Core(TM) i7-1260P
+CPU(s) scaling MHz:                      45%
+CPU max MHz:                             4700.0000
+CPU min MHz:                             400.0000
+governor: performance
+no_turbo: 0
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0

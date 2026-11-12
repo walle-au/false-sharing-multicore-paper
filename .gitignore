@@ -14,7 +14,8 @@ missfont.log
 benchmarks/fs
 benchmarks/fs_atomic
 benchmarks/fs_bench
-results/c2c/*.data
+results/c2c/**/*.data
+results/c2c/**/*.data.old
 sim/mesi_sim
 *.o
 perf.data

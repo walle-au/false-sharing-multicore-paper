@@ -1,0 +1,2 @@
+layout=shared hilos=4 stride=8 rmw=atomic cpus=0,2,4,6 iters=50000000 memoria=8 B
+  rep 0: 2.2191 s  44.381 ns/inc  90.1 Mops/s

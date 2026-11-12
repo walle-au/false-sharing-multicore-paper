@@ -1,0 +1,2 @@
+layout=shared hilos=4 stride=8 rmw=volatile cpus=8,12,9,13 iters=50000000 memoria=8 B
+  rep 0: 0.1236 s  2.472 ns/inc  1617.8 Mops/s  (suma incorrecta: actualizaciones perdidas)
