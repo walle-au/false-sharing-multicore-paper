@@ -1,0 +1,23 @@
+# LaTeX build files
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+missfont.log
+
+# Benchmark binaries and raw perf data
+benchmarks/fs
+benchmarks/fs_atomic
+*.o
+perf.data
+perf.data.old
+
+# Editors / OS
+.vscode/
+*.swp
+.DS_Store

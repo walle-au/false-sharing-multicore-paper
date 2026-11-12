@@ -1,0 +1,100 @@
+% ---------- Fuentes tecnicas (profesor y herramientas) ----------
+
+% Autor verificado: commit 911ac7979dde ("Documentation: Add document for
+% false sharing"), Feng Tang (Intel), 7 abr 2023; aplicado por Jonathan Corbet.
+@misc{tang2023kernel,
+  author       = {F. Tang},
+  title        = {False Sharing},
+  howpublished = {The Linux Kernel Documentation, Kernel Hacking Guides},
+  year         = {2023},
+  url          = {https://kernel.org/doc/html/latest/kernel-hacking/false-sharing.html},
+  note         = {Accessed: Nov. 5, 2026}
+}
+
+@misc{mario2016c2c,
+  author       = {J. Mario},
+  title        = {{C2C} -- False Sharing Detection in {Linux} Perf},
+  year         = {2016},
+  month        = sep,
+  url          = {https://joemario.github.io/blog/2016/09/01/c2c-blog/},
+  note         = {Accessed: Nov. 5, 2026}
+}
+
+@misc{mario_c2c_files,
+  author       = {J. Mario},
+  title        = {perf-c2c-usage-files: Example Reports and False Sharing Test Program},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/joemario/perf-c2c-usage-files},
+  note         = {Accessed: Nov. 5, 2026}
+}
+
+@misc{perf_c2c_man,
+  author       = {{Linux perf developers}},
+  title        = {perf-c2c(1) -- Shared Data {C2C/HITM} Analyzer},
+  howpublished = {Linux manual page},
+  url          = {https://man7.org/linux/man-pages/man1/perf-c2c.1.html},
+  note         = {Accessed: Nov. 5, 2026}
+}
+
+@manual{intel2024opt,
+  author       = {{Intel Corporation}},
+  title        = {Intel 64 and {IA}-32 Architectures Optimization Reference Manual, Volume 1},
+  year         = {2024},
+  month        = may,
+  url          = {https://www.intel.com/content/www/us/en/content-details/814198/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html},
+  note         = {Rev. 051. Accessed: Nov. 5, 2026}
+}
+
+@techreport{drepper2007memory,
+  author       = {U. Drepper},
+  title        = {What Every Programmer Should Know About Memory},
+  institution  = {Red Hat, Inc.},
+  year         = {2007},
+  month        = nov,
+  url          = {https://people.freebsd.org/~lstewart/articles/cpumemory.pdf}
+}
+
+% ---------- Articulos academicos ----------
+
+@article{torrellas1994false,
+  author       = {J. Torrellas and M. S. Lam and J. L. Hennessy},
+  title        = {False Sharing and Spatial Locality in Multiprocessor Caches},
+  journal      = {IEEE Transactions on Computers},
+  volume       = {43},
+  number       = {6},
+  pages        = {651--663},
+  year         = {1994},
+  month        = jun,
+  doi          = {10.1109/12.286299}
+}
+
+@inproceedings{liu2011sheriff,
+  author       = {T. Liu and E. D. Berger},
+  title        = {{SHERIFF}: Precise Detection and Automatic Mitigation of False Sharing},
+  booktitle    = {Proc. ACM International Conference on Object Oriented Programming Systems Languages and Applications (OOPSLA)},
+  address      = {Portland, OR, USA},
+  pages        = {3--18},
+  year         = {2011},
+  doi          = {10.1145/2048066.2048070}
+}
+
+% ---------- Libros ----------
+
+@book{hennessy2017ca,
+  author       = {J. L. Hennessy and D. A. Patterson},
+  title        = {Computer Architecture: A Quantitative Approach},
+  edition      = {6th},
+  publisher    = {Morgan Kaufmann},
+  address      = {Cambridge, MA, USA},
+  year         = {2017}
+}
+
+@book{nagarajan2020primer,
+  author       = {V. Nagarajan and D. J. Sorin and M. D. Hill and D. A. Wood},
+  title        = {A Primer on Memory Consistency and Cache Coherence},
+  edition      = {2nd},
+  series       = {Synthesis Lectures on Computer Architecture},
+  publisher    = {Springer},
+  year         = {2020},
+  doi          = {10.1007/978-3-031-01764-3}
+}

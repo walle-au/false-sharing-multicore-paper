@@ -1,0 +1,59 @@
+\documentclass[journal]{IEEEtran}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{cite}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+
+\begin{document}
+
+\title{False Sharing and Scalability in Multicore Processors: Impact of Cache-Line Data Layout on Parallel Performance}
+
+
+\author{Walter Alfaro, Allan Arrieta}
+
+\markboth{Arquitectura de Computadores I, II Semester 2026}%
+{False Sharing and Scalability in Multicore Processors}
+
+\maketitle
+
+\begin{abstract}
+Modern multicore processors keep private caches coherent at the granularity of a
+cache line, typically 64 bytes, rather than individual variables. When threads
+running on different cores write to independent variables that happen to reside
+in the same cache line, the coherence protocol forces the line to migrate
+repeatedly between cores, even though no data is logically shared. This
+phenomenon, known as false sharing, generates invalidation traffic and
+cache-to-cache transfers that can severely limit the scalability of parallel
+programs and is a recurring source of performance regressions in large systems
+such as the Linux kernel. This paper investigates how the distribution of
+variables across cache lines affects the performance of a parallel program on a
+hybrid x86-64 Intel Core i7-1260P (Alder Lake) processor, which combines
+performance and efficiency cores. We study a microbenchmark in which each
+thread, pinned to a dedicated core, updates its own independent counter,
+comparing a layout where the counters are
+stored contiguously against layouts in which they are separated through
+alignment and padding, as well as per-thread accumulation. The analysis relates
+the observed execution time and scalability with the number of threads to the
+behavior of the MESI-family coherence protocol, and uses hardware performance
+counters and the Linux \texttt{perf c2c} tool to identify contended cache lines
+through HITM (load hit in a modified line) events. In addition, the memory and
+cache-capacity overhead introduced by padding is quantified, together with the
+mitigation strategies documented by the Linux kernel community, in order to
+characterize the trade-off between coherence-traffic reduction and memory
+footprint and to derive practical guidelines for cache-aware data layout.
+\end{abstract}
+
+\begin{IEEEkeywords}
+False sharing, cache coherence, MESI, multicore processors, cache line, padding, performance analysis, perf c2c, Linux kernel.
+\end{IEEEkeywords}
+
+% Esta entrega solo incluye abstract y referencias.
+% \nocite{*} lista todas las entradas del .bib aunque no se citen en el texto.
+\nocite{*}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
