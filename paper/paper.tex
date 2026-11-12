@@ -11,6 +11,7 @@
 \usepackage[hidelinks]{hyperref}
 
 % Marcador visible para lo que falta. Antes de la version final: buscar "TODO".
+\setlength{\emergencystretch}{1em} % evita lineas desbordadas con \texttt
 \newcommand{\todo}[1]{\textbf{[TODO: #1]}}
 
 \begin{document}
@@ -24,37 +25,32 @@
 
 \maketitle
 
-% TODO (preliminar): ajustar el abstract para mencionar el simulador MESI y la
-% lectura critica de las fuentes. Sigue sin numeros hasta tener mediciones.
 \begin{abstract}
-Modern multicore processors keep private caches coherent at the granularity of a
-cache line, typically 64 bytes, rather than individual variables. When threads
-running on different cores write to independent variables that happen to reside
-in the same cache line, the coherence protocol forces the line to migrate
-repeatedly between cores, even though no data is logically shared. This
-phenomenon, known as false sharing, generates invalidation traffic and
-cache-to-cache transfers that can severely limit the scalability of parallel
-programs and is a recurring source of performance regressions in large systems
-such as the Linux kernel. This paper investigates how the distribution of
-variables across cache lines affects the performance of a parallel program on a
-hybrid x86-64 Intel Core i7-1260P (Alder Lake) processor, which combines
-performance and efficiency cores. We study a microbenchmark in which each
-thread, pinned to a dedicated core, updates its own independent counter,
-comparing a layout where the counters are
-stored contiguously against layouts in which they are separated through
-alignment and padding, as well as per-thread accumulation. The analysis relates
-the observed execution time and scalability with the number of threads to the
-behavior of the MESI-family coherence protocol, and uses hardware performance
-counters and the Linux \texttt{perf c2c} tool to identify contended cache lines
-through HITM (load hit in a modified line) events. In addition, the memory and
-cache-capacity overhead introduced by padding is quantified, together with the
-mitigation strategies documented by the Linux kernel community, in order to
-characterize the trade-off between coherence-traffic reduction and memory
-footprint and to derive practical guidelines for cache-aware data layout.
+Multicore processors keep caches coherent per cache line, not per variable, so
+threads that write independent variables stored in the same line force that
+line to move between cores. This effect, false sharing, is well documented,
+but most guidance about it comes from processor vendors, tool developers and
+studies of server-class machines. This paper examines how the placement of
+variables in cache lines affects a parallel program on a hybrid Intel Core
+i7-1260P and tests common claims from those sources rather than assuming them.
+We combine a MESI coherence simulator, written for this study and calibrated
+with our own measurements, with a microbenchmark that compares packed, padded,
+per-thread and truly shared counters on performance cores and on efficiency
+cores with and without a shared L2, using \texttt{perf c2c} to locate contended
+lines. With four threads, packed counters were 8.4 to 11.6 times slower than
+padded ones; the cost grew linearly with the number of threads, at 42 to 50
+cycles per line transfer, which the simulator reproduced within 7\%. Three
+claims proved context-dependent: padding to 128 bytes gave no benefit over
+64 bytes, a \texttt{volatile} demonstration almost hid the problem on
+performance cores but not on efficiency cores, and \texttt{perf c2c} reported 60
+to 350 times fewer HITM events on efficiency cores for a comparable slowdown.
+Per-thread accumulation outperformed padding without extra memory. We conclude
+with practical guidelines for data layout and for detecting false sharing on
+hybrid processors.
 \end{abstract}
 
 \begin{IEEEkeywords}
-False sharing, cache coherence, MESI, multicore processors, cache line, padding, performance analysis, perf c2c, Linux kernel.
+False sharing, cache coherence, MESI, multicore processors, hybrid processors, cache line, padding, simulation, performance analysis, perf c2c.
 \end{IEEEkeywords}
 
 % =====================================================================
