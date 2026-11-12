@@ -308,7 +308,7 @@ cases). With two or more threads, the packed and shared layouts grow roughly
 linearly with the thread count, while padded remains almost flat. With four
 threads, packed is $8.4\times$ slower than padded on P-cores, $9.2\times$ on
 E-cores sharing an L2, and $11.6\times$ on E-cores in different clusters
-(Fig.~\ref{fig:slowdown}). Padding to 128 bytes was within 4\% of 64-byte
+(Fig.~\ref{fig:slowdown}). Padding to 128 bytes was within 5\% of 64-byte
 padding in every configuration and is omitted from the figure. All
 configurations were repeated ten times; the coefficient of variation was below
 2\% except for the local layout, whose runs last only a few milliseconds.
@@ -384,30 +384,140 @@ near absence of false sharing for \texttt{volatile} increments on P-cores.
 % Aqui se responde RQ2. Cada punto: lo que dice la fuente, lo que vimos,
 % y por que podria diferir.
 
-\subsection{Is False Sharing as Costly as True Sharing?}
-\todo{En el modelo, packed y shared generan el mismo trafico. Comprobar en
-hardware y discutir que implica: para el hardware no existe diferencia.}
+Each subsection below starts from a claim found in the sources, contrasts it
+with what we simulated and measured, and states which parts of our explanation
+are confirmed and which remain hypotheses.
+
+\subsection{False Sharing Costs as Much as True Sharing}
+False sharing is usually presented as a subtler, secondary form of sharing.
+Our data do not support that distinction from the point of view of the
+hardware. In the simulator, the packed and shared layouts generate exactly the
+same sequence of coherence transactions, because the protocol tracks lines and
+not words. On the real processor, both layouts cost within 8\% of each other
+(within 3\% in five of the six cases) for three and four threads in all core
+groups (Fig.~\ref{fig:scaling}). The
+practical consequence is that a programmer who removes an obviously shared
+variable but leaves independent counters in one line gains nothing.
+
+The only exception is two threads on P-cores, where packed is 40\% slower than
+shared (21.6 vs.\ 15.4\,ns). Our model cannot reproduce this, and we have no
+confirmed explanation. Possible causes include a different arbitration of
+ownership requests when the two threads target different words of the line, or
+a difference in how often each core keeps the line for several consecutive
+increments. Verifying either would require counters that we have not
+collected; we report the discrepancy as an open observation.
 
 \subsection{Does 128-Byte Padding Matter?}
-\todo{En el modelo, el prefetch de la linea adyacente solo provoca un evento
-aislado cuando los contadores ya estan en estado estable: la recomendacion de
-128 B dependeria de que haya fallos repetidos. Contrastar con el manual de Intel
-y con la medicion.}
+Intel describes a spatial prefetcher that completes the aligned 128-byte pair
+of a fetched line~\cite{intel2024opt}, and padding to 128 bytes is often
+recommended for that reason. \todo{Verificar la seccion exacta del manual de
+Intel que lo dice y si la recomendacion de 128\,B es de Intel o de terceros.}
+In our measurements, 128-byte padding was within 5\% of 64-byte padding in
+every configuration, and slightly slower in some. The simulator suggests why:
+the prefetcher acts only on misses, and once each core owns its padded line in
+state M it never misses again, so the neighboring line is fetched at most once
+during warm-up (one to four events per run). The recommendation is therefore
+not wrong but conditional: it should matter when the contended lines are
+repeatedly evicted or re-fetched, for example when the counters are mixed with
+other data that miss in the cache. For a tight update loop such as ours, it
+doubles the memory cost without a measurable benefit. A vendor manual states
+the mechanism but, in our reading, does not quantify when the extra padding pays
+off; our results show that it is a workload-dependent decision.
 
-\subsection{Generalizing from Servers to a Hybrid Laptop}
-\todo{Las fuentes describen servidores con muchos nucleos; aqui hay 4 P-cores
-y una L3 compartida. Que cambia y que no.}
+\subsection{The Classic \texttt{volatile} Demonstration Can Hide the Problem}
+Many explanations of false sharing, including our own first prototype, use a
+loop of \texttt{volatile} increments. On P-cores, this demonstration nearly
+fails: packed is only $1.15\times$ slower than padded, while with locked
+increments the same layout is $8.4\times$ slower. The difference is that a
+\texttt{lock add} must own the line for every single increment, whereas a plain
+store can wait in the store buffer. Our hypothesis is that on the P-core the
+thread reads its own pending stores (store-to-load forwarding), so its loads
+rarely need the line, and the buffered stores drain in bursts whenever the
+core obtains ownership, amortizing one transfer over many increments. The fact
+that a single P-core thread completes about one dependent \texttt{volatile}
+increment per cycle suggests an aggressive forwarding or memory-renaming
+mechanism. On E-cores the same code is $3.8\times$ to $5.5\times$ slower when
+packed, so the effect is microarchitecture-specific. \todo{Buscar una fuente
+sobre store-to-load forwarding / memory renaming en Golden Cove vs.\ Gracemont
+para sostener o descartar la hipotesis.}
+
+This matters for the sources: a demonstration that works on one core type and
+not on another, of the same chip, cannot serve as evidence of the magnitude of
+the problem. It also means that the cost of false sharing depends as much on
+the instruction that writes the data as on the layout.
 
 \subsection{Limits of HITM-Based Detection}
-\todo{perf c2c muestrea loads; que pasa con patrones dominados por stores.}
+Mario~\cite{mario2016c2c} presents \texttt{perf c2c} as a way to find false
+sharing through HITM events, and our P-core recordings fully confirm that
+description: one line, four offsets, one source line. However, our results
+expose two blind spots that the tool's documentation does not emphasize.
+
+First, on E-cores the tool reports between 60 and 350 times fewer HITM samples
+for a slowdown of the same order. In the recordings, E-cores produce almost no
+load samples (165 versus 44\,634 on P-cores) and the locked increments appear
+mainly as store samples. Store samples on Intel report only whether the store
+hit the L1 cache, so they cannot be classified as HITM. Because
+\texttt{perf c2c} ranks lines by HITM count, a line that is equally harmful but
+accessed from E-cores could be ranked below less harmful lines in a real
+program. Second, the \texttt{volatile} packed layout produces almost no HITM on
+any core group, although on E-cores it is up to $5.5\times$ slower than padded.
+This is the most dangerous combination: a real cost that the tool does not
+show.
+
+We do not claim that the tool is wrong; it reports what the sampling hardware
+provides. But its effectiveness depends on the core type and on the access
+pattern, and that dependence is not visible to the user. The fact that the
+author of the documentation is also a co-author of the tool is not, by itself,
+evidence of bias; what our data show is that its description was written for
+server processors without hybrid cores, which did not exist at the time.
+
+\subsection{Generalizing from Servers to a Hybrid Laptop}
+The kernel documentation~\cite{tang2023kernel}, written by an Intel engineer,
+draws its examples from regressions found on large servers. One could suspect
+that false sharing is a problem only at that scale. Our results show otherwise:
+two threads on a laptop already suffer a $5.4\times$ slowdown. At the same time,
+topology matters even inside one chip. A line transfer between E-cores that
+share an L2 costs about 42 cycles, compared with 50 cycles between E-core
+clusters and 47 cycles between P-cores through the L3.
+
+The slowdown factors themselves deserve caution. The E-cores show the largest
+factor ($11.6\times$), but partly because their uncontended locked increment is
+slower in nanoseconds; in cycles, the uncontended cost is the same (18 cycles)
+on both core types. Reporting only ``times slower,'' as is common, mixes the
+cost of the transfer with the cost of the baseline. We therefore also report
+the absolute cost per transfer, which is the quantity that the simulator
+predicts.
 
 \subsection{The Cost of Mitigation}
-\todo{8 B vs. 64 B vs. 128 B por contador: 8x o 16x mas memoria, mas lineas de
-cache y presion de TLB. Cuando no vale la pena (contadores poco escritos).}
+Padding a counter from 8 to 64 bytes multiplies its memory footprint by eight,
+and to 128 bytes by sixteen. For four counters this is irrelevant (32\,B versus
+256\,B), but for per-object counters in large arrays or structures it wastes
+cache capacity and TLB reach, which can slow down the rest of the program. The
+best layout in our experiment was not padding but per-thread accumulation,
+which was 16 (E-cores) to 27 (P-cores) times faster than padding and did not need extra memory. It
+corresponds to the per-CPU counters recommended by the kernel
+documentation~\cite{tang2023kernel}. Padding is a fallback for data that must
+remain shared; restructuring the computation to avoid writing shared lines is
+the stronger mitigation.
 
 \subsection{Threats to Validity}
-\todo{Simplificaciones del simulador, frecuencia variable/turbo, scheduler,
-microbenchmark como peor caso.}
+\begin{itemize}
+  \item \textbf{Worst-case workload.} The microbenchmark does nothing but update
+        counters. Real programs interleave computation, so the slowdowns we
+        report are upper bounds for this access pattern.
+  \item \textbf{Calibration.} The simulator was calibrated with data from the
+        same machine; its agreement at the calibration points is not an
+        independent validation.
+  \item \textbf{Simplified model.} The simulator uses a serialized bus, has no
+        store buffer and no ring topology, and models the prefetcher only
+        approximately.
+  \item \textbf{Frequency.} Turbo frequency decreases with the number of active
+        cores; this probably explains why padded rises from 3.87 to 4.76\,ns on
+        P-cores, and it affects conversions between nanoseconds and cycles.
+  \item \textbf{One platform, one sample of \texttt{perf c2c}.} All results
+        come from one processor, and each \texttt{perf c2c} configuration was
+        recorded once.
+\end{itemize}
 
 % =====================================================================
 \section{Conclusions}
