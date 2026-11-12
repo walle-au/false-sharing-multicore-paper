@@ -7,6 +7,7 @@
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{amsmath}
+\usepackage{tikz}
 \usepackage[hidelinks]{hyperref}
 
 % Marcador visible para lo que falta. Antes de la version final: buscar "TODO".
@@ -70,8 +71,17 @@ Because the effect depends on memory layout rather than on the algorithm, it is
 invisible in the source code and is usually discovered only through
 profiling~\cite{mario2016c2c,liu2011sheriff}.
 
-\todo{1 parrafo: por que importa hoy (kernel, servidores, laptops hibridas).
-Citar la doc del kernel como fuente del problema, no como prueba de magnitud.}
+The problem is not only of historical interest. The Linux kernel documentation
+describes false sharing as a recurring cause of performance regressions in the
+kernel and lists the data-layout patterns that produce
+it~\cite{tang2023kernel}. At the same time, the hardware on which programs run
+has changed: since its 12th generation, Intel's client processors combine two
+kinds of cores, performance cores (P-cores) and efficiency cores (E-cores),
+with different microarchitectures and cache organizations on the same
+chip~\cite{intel2024opt}. A thread may run on either kind, so the cost of
+sharing a line, and the ability of tools to detect it, may differ between two
+threads of the same program. Most of the classic literature on false sharing
+predates this design.
 
 Most of the guidance on false sharing comes from a small group of sources:
 processor vendors, the developers of the detection tools, and research
@@ -90,9 +100,28 @@ pose three questions:
         is that cost worth paying?
 \end{enumerate}
 
-\todo{Contribuciones: (1) simulador MESI propio y abierto; (2) mediciones en
-i7-1260P con perf c2c; (3) contraste simulacion vs. hardware; (4) lectura
-critica de las fuentes. Ultimo parrafo: organizacion del paper.}
+To answer them, this paper makes four contributions:
+\begin{itemize}
+  \item a trace-driven MESI simulator, written for this study, that isolates
+        the coherence events caused by each data layout and lets us vary
+        parameters that are fixed in hardware, such as the line size and the
+        adjacent-line prefetcher;
+  \item measurements on an Intel Core i7-1260P comparing four data layouts on
+        three groups of cores (P-cores, E-cores that share an L2, and E-cores in
+        different clusters), complemented with \texttt{perf c2c} recordings;
+  \item a comparison between the calibrated simulator and the hardware, in
+        which the disagreements are treated as findings rather than errors;
+  \item a critical reading of the main sources, in which each recommendation
+        is checked against our own evidence and the context in which it was
+        written.
+\end{itemize}
+
+Section~\ref{sec:background} reviews cache coherence and the detection of false
+sharing. Section~\ref{sec:related} summarizes the sources and their context.
+Section~\ref{sec:method} describes the simulator and the hardware experiment,
+Section~\ref{sec:results} presents the results, Section~\ref{sec:discussion}
+discusses them against the sources, and Section~\ref{sec:conclusions}
+concludes.
 
 % =====================================================================
 \section{Background}
@@ -107,22 +136,95 @@ Consequently, two variables that reside in the same line are treated by the
 hardware as a single shared object~\cite{hennessy2017ca,nagarajan2020primer}.
 
 \subsection{The MESI Protocol}
-\todo{Describir los 4 estados (M, E, S, I), las transacciones BusRd, BusRdX y
-BusUpgr, y una tabla o diagrama de transiciones. Fuentes: Hennessy--Patterson y
-Nagarajan et al. Aclarar que Intel usa una variante (MESIF) y que el detalle
-exacto no es publico.}
+In the MESI protocol each line in a private cache is in one of four
+states~\cite{hennessy2017ca,nagarajan2020primer}:
+\begin{itemize}
+  \item \textbf{Modified (M):} the only valid copy, which differs from memory;
+  \item \textbf{Exclusive (E):} the only cached copy, equal to memory;
+  \item \textbf{Shared (S):} one of possibly several read-only copies;
+  \item \textbf{Invalid (I):} no usable copy.
+\end{itemize}
+A core may write only to a line in state M or E (E changes silently to M). To
+read a line it does not hold, it issues a read request (BusRd), and any copy in
+M elsewhere must supply the data and downgrade to S. To write, it issues a
+read-for-ownership (BusRdX) or, if it already holds the line in S, an upgrade
+(BusUpgr); in both cases every other copy is invalidated. A write by one core
+therefore always removes the line from all other caches, and the next access by
+any of them misses.
+
+Commercial processors implement variants of this protocol; Intel processors
+are commonly described as using MESIF, which adds a Forward state that
+designates one sharer to answer requests~\cite{hennessy2017ca}. The exact
+protocol and interconnect of the i7-1260P are not publicly documented, which is
+one reason why we use a simple, explicit model alongside the measurements.
+\todo{Confirmar que Hennessy--Patterson (6.\textsuperscript{a} ed.) menciona
+MESIF; si no, citar otra fuente o quitar la frase.}
 
 \subsection{True Sharing vs. False Sharing}
-\todo{Definicion formal (Torrellas et al.): un fallo es de false sharing si la
-palabra que se invalida no es la que se usa. Condiciones: varios nucleos, misma
-linea, al menos una escritura~\cite{tang2023kernel}. Figura: 4 contadores de 8 B
-en una linea de 64 B.}
+A coherence miss is caused by \emph{true sharing} when the missing core
+accesses the same data that another core wrote, so the communication is
+required by the program. It is caused by \emph{false sharing} when the core
+accesses different data that happen to lie in the same line as the written
+data; the communication is then an artifact of the line size. Torrellas et
+al.\ classified coherence misses in this way and showed that the fraction of
+false-sharing misses grows with the line size~\cite{torrellas1994false}.
+
+False sharing hurts when two conditions hold~\cite{tang2023kernel}: several
+cores access the same line, and at least one of the accesses is a write.
+Fig.~\ref{fig:layout} shows the case studied in this paper. In the packed
+layout, four 8-byte counters, each written by a different core, occupy one
+64-byte line; every increment invalidates the copies of the other three cores.
+In the padded layout each counter has its own line and no core ever invalidates
+another.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}[x=0.40cm,y=0.40cm,font=\scriptsize]
+  % packed
+  \node[anchor=east] at (-0.3,2.5) {packed};
+  \foreach \i/\c in {0/0,1/1,2/2,3/3} {
+    \draw[fill=black!25] (\i,2) rectangle ++(1,1);
+    \node at (\i+0.5,2.5) {c\c};
+  }
+  \foreach \i in {4,...,7} \draw (\i,2) rectangle ++(1,1);
+  \draw[very thick] (0,2) rectangle (8,3);
+  \node[anchor=west] at (8.2,2.5) {1 line, 4 writers};
+  % padded: 4 lineas de 8 palabras (a media escala), el contador en la palabra 0
+  \node[anchor=east] at (-0.3,0.5) {padded};
+  \foreach \l in {0,...,3} {
+    \pgfmathsetmacro{\x}{\l*2.05}
+    \draw[fill=black!25] (\x,0) rectangle ++(0.225,1);
+    \foreach \w in {1,...,7} \draw (\x+\w*0.225,0) rectangle ++(0.225,1);
+    \draw[very thick] (\x,0) rectangle ++(1.8,1);
+    \node at (\x+0.9,-0.55) {c\l};
+  }
+  \node[anchor=west] at (8.2,0.5) {4 lines, 1 writer each};
+\end{tikzpicture}
+\caption{The two main layouts. Each thick box is one 64-byte cache line
+divided into eight 8-byte words (padded lines drawn at reduced scale); shaded words
+hold the counters c0--c3, written by cores 0--3. Packed: 32 bytes of data, one
+contended line. Padded: 256 bytes, no shared line.}
+\label{fig:layout}
+\end{figure}
 
 \subsection{Detecting False Sharing with \texttt{perf c2c}}
-\todo{Que es un HITM (load que encuentra la linea en estado M en otra cache),
-como perf c2c lo muestrea y que reporta (lineas, offsets, nodos/CPUs)
-\cite{perf_c2c_man,mario2016c2c}. Anotar desde ya la limitacion: es muestreo y se
-basa en loads.}
+A HITM (\emph{hit in modified}) is a load that finds the requested line in
+state M in another core's cache, so the data must be transferred from that cache
+instead of from the shared cache or memory~\cite{perf_c2c_man}. Frequent HITM
+events on one line are the signature of a line that moves between cores.
+
+The \texttt{perf c2c} tool, co-developed by Joe Mario and upstream in Linux since
+version 4.2, records memory accesses through the processor's sampling hardware
+(PEBS on Intel) and groups them by cache line~\cite{mario2016c2c,perf_c2c_man}.
+For each contended line it reports the number of HITM samples, the offsets
+within the line that were accessed, the source lines and the CPUs involved.
+Different threads writing different offsets of one line is the pattern of false
+sharing; many threads at the same offset is true sharing. Two properties of the
+tool are relevant for this paper: it is based on sampling, so it sees a fraction
+of the accesses; and HITM is a property of \emph{load} samples, since store
+samples on Intel report only whether the store hit the L1
+cache~\cite{perf_c2c_man}. \todo{Confirmar en la man page de perf-c2c lo de
+los stores (solo L1 hit/miss).}
 
 % =====================================================================
 \section{Related Work and Critical Review of Sources}
@@ -233,10 +335,11 @@ the LLC or to memory. Note that calibrating with data from the same platform
 means that agreement at those two points is not an independent validation;
 only the predictions for other thread counts and layouts are.
 
-\todo{Aclarar que el bus serializado es una simplificacion: el i7-1260P usa un
-ring y una L3 compartida. Explicar por que aun asi el modelo predice el
-crecimiento lineal (la linea disputada es una sola: solo un nucleo puede
-tenerla en M a la vez).}
+Although the i7-1260P connects its cores through a ring and a shared L3
+rather than a bus, the serialized bus is adequate for this workload: only one
+line is contended, and only one core can hold it in state M at a time, so its
+transfers are serialized whatever the interconnect. The model would be
+inadequate for workloads with many independent contended lines.
 
 Four sweeps are run (\texttt{sim/sweep.sh}): (i) scaling with $N$ for each
 layout; (ii) line size versus counter stride; (iii) adjacent-line prefetch with
@@ -297,8 +400,11 @@ With the adjacent-line prefetch enabled and 64-byte padding, the simulator
 records only one to four prefetch-induced HITM events per run (for 2 to 8
 threads), all during warm-up. Once each core owns its line in the M state it
 never misses again, so the prefetcher is never triggered.
-\todo{Mencionar el barrido de sensibilidad (\texttt{hitm\_sensitivity.csv}):
-el costo de packed escala linealmente con la latencia HITM supuesta.}
+The sensitivity sweep confirms that, in the model, the cost of the packed
+layout is set entirely by the assumed transfer latency: with four threads it
+equals four times that latency (120 to 600 cycles for latencies of 30 to 150
+cycles), while padded stays at 19 cycles. This is why the transfer latency had
+to be calibrated rather than assumed.
 
 \subsection{Measurements on the i7-1260P}
 Fig.~\ref{fig:scaling} shows the cost per increment for each layout and core
@@ -375,7 +481,7 @@ E-core clusters. The model fails in two places: it predicts that packed and
 shared cost the same, whereas on two P-cores packed is 40\% slower than shared
 (21.6 vs.\ 15.4\,ns); and, since it has no store buffer, it cannot reproduce the
 near absence of false sharing for \texttt{volatile} increments on P-cores.
-\todo{Explicar las dos discrepancias en la Discusion.}
+Both discrepancies are discussed in Section~\ref{sec:discussion}.
 
 % =====================================================================
 \section{Discussion}
@@ -523,7 +629,43 @@ the stronger mitigation.
 \section{Conclusions}
 \label{sec:conclusions}
 % =====================================================================
-\todo{Responder RQ1--RQ3 en un parrafo cada una y dar guias practicas.}
+\textbf{RQ1 (magnitude).} On the i7-1260P, placing four independent
+counters in one cache line made locked increments $8.4\times$ to $11.6\times$
+slower than padding them, depending on the cores involved, and two threads were
+already enough for a $5.4\times$ slowdown on P-cores. The cost grows linearly with
+the number of threads, about one line transfer per increment, which costs
+42 to 50 cycles depending on whether the cores share an L2. Hardware does not
+distinguish false from true sharing: both cost the same.
+
+\textbf{RQ2 (claims of the sources).} The basic mechanism described by all the
+sources was confirmed by both the simulator and the measurements. Three
+commonly repeated recommendations, however, depend on context. Padding to
+128 bytes brought no benefit over 64 bytes for our workload, because the
+adjacent-line prefetcher acts only on misses. The classic \texttt{volatile}
+demonstration nearly hides the problem on P-cores but not on E-cores of the same
+chip. And \texttt{perf c2c}, which works exactly as documented on P-cores,
+reports 60 to 350 times fewer HITM events on E-cores and almost none for the
+\texttt{volatile} pattern, even when the slowdown is real. None of these
+sources is wrong; each was written for a context (server processors,
+homogeneous cores, locked updates) that does not cover a hybrid laptop.
+
+\textbf{RQ3 (cost of mitigation).} Padding multiplies the memory of a counter
+by 8 (64\,B) or 16 (128\,B). It is negligible for a few hot counters but not for
+per-object fields in large data structures. Per-thread accumulation was 16 to
+27 times faster than padding and needed no extra memory.
+
+From these results we derive four practical guidelines: (1) prefer per-thread or
+per-CPU accumulation over padding; (2) pad hot, frequently written data to
+64 bytes, and consider 128 bytes only if measurements show a benefit; (3) do not
+use \texttt{volatile} microbenchmarks to estimate the cost of false sharing;
+(4) on hybrid processors, do not interpret a low HITM count in
+\texttt{perf c2c} as evidence that there is no false sharing, especially for
+threads running on E-cores.
+
+As future work, the simulator could add a store buffer to model the
+\texttt{volatile} case, the experiment could be repeated on an AMD processor,
+whose \texttt{perf c2c} support relies on a different sampling mechanism, and
+the analysis could be extended from a microbenchmark to a real application.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
