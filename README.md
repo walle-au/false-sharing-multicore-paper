@@ -43,13 +43,16 @@ program stops scaling.
 # Paper (needs IEEEtran, e.g. texlive-publishers)
 cd paper && pdflatex paper && bibtex paper && pdflatex paper && pdflatex paper
 
-# Benchmark, pinned to one thread per physical P-core
-gcc -O2 -g -pthread benchmarks/fs_atomic.c -o benchmarks/fs_atomic
-taskset -c 0,2,4,6 ./benchmarks/fs_atomic
+# Simulator
+cd sim && make && ./sweep.sh            # CSVs in results/sim/
 
-# Contended cache lines
-sudo perf c2c record -- taskset -c 0,2,4,6 ./benchmarks/fs_atomic
-sudo perf c2c report --stdio
+# Benchmark (one thread per physical P-core)
+cd benchmarks && make
+./fs_bench -l packed -n 4 --cpus 0,2,4,6 -r 10
+./run_bench.sh                          # full sweep -> results/hw/bench.csv
+
+# Contended cache lines (perf c2c, one recording per layout)
+sudo ./record_c2c.sh                    # reports in results/c2c/
 ```
 
 ## Authors

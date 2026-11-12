@@ -74,7 +74,8 @@ y el enfoque del experimento todavía pueden cambiar.
 | `paper/references.bib` | 10 referencias verificadas en BibTeX (estilo `IEEEtran`) |
 | `paper/paper.pdf` | Compilación vieja (desactualizada) |
 | `benchmarks/fs.c` | Benchmark: contadores juntos (8 B) vs separados (64 B), 1–6 hilos, `volatile ++` |
-| `benchmarks/fs_atomic.c` | Igual, pero con incremento atómico (`__atomic_fetch_add`) |
+| `benchmarks/fs_atomic.c` | Igual, pero con incremento atómico (`__atomic_fetch_add`). Reemplazados por `fs_bench.c` |
+| `benchmarks/fs_bench.c` | Benchmark unificado: `-l packed/padded/local/shared`, `-n` hilos, `-s` stride, `--rmw atomic/volatile`, `--cpus` para fijar hilos, `-r` repeticiones, `--csv`. `run_bench.sh` barre P-cores, E-cores mismo cluster (8-11) y E-cores entre clusters; `record_c2c.sh` graba perf c2c por layout |
 | `docs/Proyectos_Guia_temas_paper_ADC1_2026.pdf` | Guía oficial de temas y fechas |
 | `sim/mesi_sim.c` | Simulador MESI propio (N núcleos, bus snooping, layouts packed/padded/local/shared, prefetch adyacente). `make && ./sweep.sh` genera CSV en `results/sim/` |
 

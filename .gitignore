@@ -13,6 +13,8 @@ missfont.log
 # Benchmark binaries and raw perf data
 benchmarks/fs
 benchmarks/fs_atomic
+benchmarks/fs_bench
+results/c2c/*.data
 sim/mesi_sim
 *.o
 perf.data
