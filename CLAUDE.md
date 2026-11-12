@@ -99,7 +99,7 @@ cd paper && pdflatex paper && bibtex paper && pdflatex paper && pdflatex paper
 - No inventa resultados numéricos. Mantenerlo así hasta tener mediciones reales.
 - Si cambia el procesador o la metodología, ajustar el abstract.
 
-## Referencias (10, todas verificadas el 5 nov 2026)
+## Referencias (12; 10 verificadas el 5 nov, 2 agregadas el 12 nov)
 
 | Clave | Fuente | Para qué sirve |
 |---|---|---|
@@ -113,6 +113,8 @@ cd paper && pdflatex paper && bibtex paper && pdflatex paper && pdflatex paper
 | `liu2011sheriff` | OOPSLA 2011, pp. 3–18, DOI 10.1145/2048066.2048070 | Detección y mitigación automática |
 | `hennessy2017ca` | Hennessy & Patterson, 6.ª ed., 2017 | Libro base: MESI y multiprocesadores |
 | `nagarajan2020primer` | Primer, 2.ª ed., 2020 (acceso abierto) | Referencia formal de protocolos de coherencia |
+| `goodman2009mesif` | Goodman & Hum, MESIF (2009), Univ. Auckland | Agregada 12 nov: QPI deriva de MESIF (verificado en el PDF) |
+| `ertl_memdep` | Ertl, Memory Dependency Microbenchmark, TU Wien | Agregada 12 nov: Golden Cove y Gracemont hacen forwarding casi sin latencia |
 
 - **Se eliminaron** por redundantes o porque no se pudieron verificar: el correo
   de Torvalds sobre `mmap_lock` (lore.kernel.org bloquea el acceso y el asunto

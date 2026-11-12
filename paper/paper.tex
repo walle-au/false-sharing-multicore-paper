@@ -148,13 +148,12 @@ read-for-ownership (BusRdX) or, if it already holds the line in S, an upgrade
 therefore always removes the line from all other caches, and the next access by
 any of them misses.
 
-Commercial processors implement variants of this protocol; Intel processors
-are commonly described as using MESIF, which adds a Forward state that
-designates one sharer to answer requests~\cite{hennessy2017ca}. The exact
-protocol and interconnect of the i7-1260P are not publicly documented, which is
-one reason why we use a simple, explicit model alongside the measurements.
-\todo{Confirmar que Hennessy--Patterson (6.\textsuperscript{a} ed.) menciona
-MESIF; si no, citar otra fuente o quitar la frase.}
+Commercial processors implement variants of this protocol. Intel's QuickPath
+Interconnect protocol, for example, is derived from MESIF, which adds a Forward
+state to ensure that a single cache answers a request for shared
+data~\cite{goodman2009mesif}. How coherence is implemented inside a single client
+chip such as the i7-1260P is not publicly documented, which is one reason why we
+use a simple, explicit model alongside the measurements.
 
 \subsection{True Sharing vs. False Sharing}
 A coherence miss is caused by \emph{true sharing} when the missing core
@@ -217,10 +216,10 @@ within the line that were accessed, the source lines and the CPUs involved.
 Different threads writing different offsets of one line is the pattern of false
 sharing; many threads at the same offset is true sharing. Two properties of the
 tool are relevant for this paper: it is based on sampling, so it sees a fraction
-of the accesses; and HITM is a property of \emph{load} samples, since store
-samples on Intel report only whether the store hit the L1
-cache~\cite{perf_c2c_man}. \todo{Confirmar en la man page de perf-c2c lo de
-los stores (solo L1 hit/miss).}
+of the accesses; and HITM is a property of \emph{load} samples. The report
+classifies loads by where they were served (L1, L2, LLC, local or remote HITM,
+DRAM), but classifies stores only as L1 hits, L1 misses, or
+unknown~\cite{perf_c2c_man}.
 
 % =====================================================================
 \section{Related Work and Critical Review of Sources}
@@ -232,14 +231,83 @@ los stores (solo L1 hit/miss).}
 % afirmado por el fabricante.
 
 \subsection{What the Sources Claim}
-\todo{Resumen breve de cada fuente: Torrellas 1994 (false sharing vs.
-localidad espacial y tamano de linea), Liu y Berger 2011 (SHERIFF), doc del
-kernel (patrones y mitigaciones), Mario 2016 (perf c2c), manual de Intel
-(recomendaciones de layout y prefetcher), Drepper 2007 (costo de coherencia).}
+\textbf{Torrellas, Lam and Hennessy (1994)}~\cite{torrellas1994false} explain
+the effect of the cache block size on the miss rate of shared data as the sum of
+two opposing components: false sharing, which grows with the block size, and
+spatial locality, which shrinks the miss rate as the block grows. Their analysis
+of six parallel applications ``confirms that false sharing has a significant
+impact on the miss rate,'' but also that ``poor spatial locality among accesses
+to shared data has an even larger impact.'' Their layout optimizations reduced
+misses on shared data by about 10\% on average.
+
+\textbf{Drepper (2007)}~\cite{drepper2007memory} measured a program in which
+each thread increments its own memory location 500 million times. On a machine
+with four Pentium~4 processors, placing the locations in one line instead of
+separate lines produced overheads of 390\%, 734\% and 1147\% for two, three and
+four threads. On a single quad-core Core~2 QX6700, however, the same test ``does
+not show any scalability issues.'' He also rejects padding everything as a
+general solution, because the footprint ``would increase a lot,'' and proposes
+classifying variables by how often they are written.
+
+\textbf{Liu and Berger (2011)}~\cite{liu2011sheriff} present SHERIFF, which runs
+threads as processes and compares their per-page updates at synchronization
+points. They state that false sharing ``can degrade application performance by
+as much as an order of magnitude,'' report an average detection overhead of
+20\% (with outliers of $8\times$ and $11\times$), and a speedup of up to $9\times$
+from automatic mitigation, on Phoenix and PARSEC benchmarks.
+
+\textbf{The Linux kernel documentation (2023)}~\cite{tang2023kernel} defines
+the two conditions for harmful false sharing, describes common pitfalls (a lock
+next to the data it protects, small global variables grouped together, members
+of large structures), and lists mitigations: dedicated cache lines, reorganized
+structures, reading before writing, and per-CPU counters. It explicitly names a
+cost of the first mitigation: ``more consumption of memory, cache line and TLB
+entries.'' It recommends \texttt{perf c2c} and \texttt{pahole} for detection.
+
+\textbf{Mario (2016)}~\cite{mario2016c2c} explains how to use \texttt{perf c2c}:
+a HITM, ``a load that hit in a modified cacheline,'' is ``the key that false
+sharing has occurred,'' and the report shows the offsets inside each contended
+line, which reveal different threads writing different words.
+
+\textbf{Intel's optimization manual}~\cite{intel2024opt} describes, among other
+prefetchers, a spatial prefetcher that tries to complete every line fetched into
+the L2 with its pair to form a 128-byte aligned chunk.
 
 \subsection{Who Wrote Them, and Under What Conditions}
-\todo{Para cada fuente, contexto y posible sesgo. Verificar cada punto contra
-la fuente antes de afirmarlo.}
+None of these sources is suspect a priori, but each was written from a
+particular position, which limits what its results can show.
+\begin{itemize}
+  \item \emph{Hardware generation.} Torrellas et al.\ simulated 16- and
+        32-processor bus machines with an invalidation protocol; Drepper
+        measured a Pentium~4 SMP and a Core~2. None of them includes hybrid
+        cores, ring interconnects or modern store buffers. Notably, Drepper's
+        two machines already disagreed with each other, which anticipates our
+        finding that the effect depends on the microarchitecture.
+  \item \emph{Scale.} The kernel documentation motivates the problem with
+        ``recent large system with hundreds of CPUs'' and gives no slowdown
+        numbers. Mario's guidance also targets large servers (``4, 8 or 16
+        socket systems'') and reports no before/after measurements.
+  \item \emph{Authors and their tools.} The kernel page carries no byline, but
+        the commit that added it shows it was written by an Intel engineer
+        (Feng Tang). Mario co-developed \texttt{perf c2c}, and Liu and Berger
+        evaluate their own tool on benchmarks they selected (a dual quad-core
+        Xeon, 32-bit builds). This is normal practice, but it means that the
+        limits of each tool are described less thoroughly than its strengths:
+        SHERIFF, for instance, ``cannot currently intercept atomic operations
+        written in assembly'' and cannot detect a single writer with readers,
+        and the \texttt{perf c2c} documentation does not mention hybrid CPUs.
+  \item \emph{Vendor documents.} The Intel manual describes mechanisms, but in
+        our reading it does not quantify when they cause false sharing; the
+        widespread advice to pad to 128 bytes comes mostly from practitioners
+        who infer it from the spatial prefetcher.
+  \item \emph{Magnitude claims.} ``An order of magnitude'' (SHERIFF) and the
+        Pentium~4 overheads (Drepper) come from worst-case loops, while
+        Torrellas et al., measuring whole applications, found that false
+        sharing was not the dominant source of misses. Microbenchmarks,
+        including ours, show what false sharing \emph{can} cost, not what it
+        typically costs.
+\end{itemize}
+Table~\ref{tab:sources} summarizes how we test each source.
 
 \begin{table}[!t]
 \caption{Critical Reading of the Main Sources}
@@ -250,12 +318,12 @@ la fuente antes de afirmarlo.}
 \toprule
 \textbf{Source} & \textbf{Context / possible bias} & \textbf{How we test it} \\
 \midrule
-Kernel docs~\cite{tang2023kernel} & Written by an Intel engineer; cases from large servers & Magnitude on a 4-P-core laptop \\
-Mario~\cite{mario2016c2c} & Co-author of the tool he documents & Detection under few or store-only accesses \\
-Intel manual~\cite{intel2024opt} & Vendor document; claims rarely quantified & 64\,B vs.\ 128\,B padding \\
-Drepper~\cite{drepper2007memory} & 2007 hardware & Whether costs still hold \\
+Kernel docs~\cite{tang2023kernel} & Intel author; large servers; no numbers & Magnitude on a laptop, 2--4 threads \\
+Mario~\cite{mario2016c2c} & Tool co-author; multi-socket servers & HITM detection on P- and E-cores \\
+Intel manual~\cite{intel2024opt} & Vendor; mechanism not quantified & 64\,B vs.\ 128\,B padding \\
+Drepper~\cite{drepper2007memory} & 2007 hardware; plain increments & Locked vs.\ plain increments today \\
 Torrellas~\cite{torrellas1994false} & Simulated 1990s bus machines & Line-size sweep in our simulator \\
-SHERIFF~\cite{liu2011sheriff} & Authors evaluate their own tool & \todo{revisar trabajos posteriores} \\
+SHERIFF~\cite{liu2011sheriff} & Own tool, own benchmarks & Not tested; discussed only \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -511,9 +579,9 @@ collected; we report the discrepancy as an open observation.
 
 \subsection{Does 128-Byte Padding Matter?}
 Intel describes a spatial prefetcher that completes the aligned 128-byte pair
-of a fetched line~\cite{intel2024opt}, and padding to 128 bytes is often
-recommended for that reason. \todo{Verificar la seccion exacta del manual de
-Intel que lo dice y si la recomendacion de 128\,B es de Intel o de terceros.}
+of a fetched line~\cite{intel2024opt}, and practitioners often recommend padding
+to 128 bytes for that reason. \todo{Ubicar la frase exacta en la rev.~051 del
+manual (seccion ``Data Prefetching'') y anotar la pagina.}
 In our measurements, 128-byte padding was within 5\% of 64-byte padding in
 every configuration, and slightly slower in some. The simulator suggests why:
 the prefetcher acts only on misses, and once each core owns its padded line in
@@ -539,9 +607,22 @@ core obtains ownership, amortizing one transfer over many increments. The fact
 that a single P-core thread completes about one dependent \texttt{volatile}
 increment per cycle suggests an aggressive forwarding or memory-renaming
 mechanism. On E-cores the same code is $3.8\times$ to $5.5\times$ slower when
-packed, so the effect is microarchitecture-specific. \todo{Buscar una fuente
-sobre store-to-load forwarding / memory renaming en Golden Cove vs.\ Gracemont
-para sostener o descartar la hipotesis.}
+packed, so the effect is microarchitecture-specific.
+
+Fast forwarding alone, however, does not explain the difference. Ertl's
+memory-dependency microbenchmark~\cite{ertl_memdep} measures dependent
+store-load chains on both core types of a hybrid Core i3-1315U and finds about
+0.65 cycles per operation on the P-core (Golden Cove) and 0.7 to 1 cycle on the
+E-core (Gracemont): both forward a store to a dependent load with almost no
+latency. The difference must therefore lie in how each core drains its store
+buffer while another core holds the line, which we cannot observe with our
+tools. We keep this part of the explanation as a hypothesis.
+
+The observation is not new. Drepper's 2007 experiment used plain (non-atomic)
+increments: it showed overheads of up to 1147\% on a Pentium~4
+multiprocessor but no scalability problem on a quad-core Core~2~\cite{drepper2007memory}.
+Nineteen years later, the same kind of program still gives opposite answers
+depending on the core it runs on, now within a single chip.
 
 This matters for the sources: a demonstration that works on one core type and
 not on another, of the same chip, cannot serve as evidence of the magnitude of
@@ -557,8 +638,8 @@ expose two blind spots that the tool's documentation does not emphasize.
 First, on E-cores the tool reports between 60 and 350 times fewer HITM samples
 for a slowdown of the same order. In the recordings, E-cores produce almost no
 load samples (165 versus 44\,634 on P-cores) and the locked increments appear
-mainly as store samples. Store samples on Intel report only whether the store
-hit the L1 cache, so they cannot be classified as HITM. Because
+mainly as store samples, which \texttt{perf c2c} classifies only as L1 hits or
+misses~\cite{perf_c2c_man}, so they can never count as HITM. Because
 \texttt{perf c2c} ranks lines by HITM count, a line that is equally harmful but
 accessed from E-cores could be ranked below less harmful lines in a real
 program. Second, the \texttt{volatile} packed layout produces almost no HITM on
