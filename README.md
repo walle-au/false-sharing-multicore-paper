@@ -32,8 +32,9 @@ program stops scaling.
 | Path | Contents |
 |---|---|
 | `paper/` | IEEE Transactions paper (`paper.tex`, `references.bib`) |
-| `benchmarks/` | C microbenchmarks |
-| `results/` | Raw measurements and `perf c2c` reports |
+| `benchmarks/` | C microbenchmarks (real hardware) |
+| `sim/` | Trace-driven MESI coherence simulator in C (`make`, `./sweep.sh`) |
+| `results/` | Raw measurements, `perf c2c` reports and simulator CSVs (`results/sim/`) |
 | `docs/` | Course guidelines and notes |
 
 ## Build & run

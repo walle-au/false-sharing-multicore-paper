@@ -4,12 +4,17 @@
 \usepackage[T1]{fontenc}
 \usepackage{cite}
 \usepackage{url}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
 \usepackage[hidelinks]{hyperref}
+
+% Marcador visible para lo que falta. Antes de la version final: buscar "TODO".
+\newcommand{\todo}[1]{\textbf{[TODO: #1]}}
 
 \begin{document}
 
 \title{False Sharing and Scalability in Multicore Processors: Impact of Cache-Line Data Layout on Parallel Performance}
-
 
 \author{Walter Alfaro, Allan Arrieta}
 
@@ -18,6 +23,8 @@
 
 \maketitle
 
+% TODO (preliminar): ajustar el abstract para mencionar el simulador MESI y la
+% lectura critica de las fuentes. Sigue sin numeros hasta tener mediciones.
 \begin{abstract}
 Modern multicore processors keep private caches coherent at the granularity of a
 cache line, typically 64 bytes, rather than individual variables. When threads
@@ -49,9 +56,245 @@ footprint and to derive practical guidelines for cache-aware data layout.
 False sharing, cache coherence, MESI, multicore processors, cache line, padding, performance analysis, perf c2c, Linux kernel.
 \end{IEEEkeywords}
 
-% Esta entrega solo incluye abstract y referencias.
-% \nocite{*} lista todas las entradas del .bib aunque no se citen en el texto.
-\nocite{*}
+% =====================================================================
+\section{Introduction}
+\label{sec:intro}
+% =====================================================================
+% Objetivo: motivar el problema y plantear las preguntas. ~0.75 columnas.
+
+\IEEEPARstart{P}{arallel} programs are expected to run faster as more cores are
+added. A well-known obstacle to this expectation is \emph{false sharing}: threads
+that never touch each other's data can still slow each other down when their
+data happen to share a cache line~\cite{torrellas1994false,tang2023kernel}.
+Because the effect depends on memory layout rather than on the algorithm, it is
+invisible in the source code and is usually discovered only through
+profiling~\cite{mario2016c2c,liu2011sheriff}.
+
+\todo{1 parrafo: por que importa hoy (kernel, servidores, laptops hibridas).
+Citar la doc del kernel como fuente del problema, no como prueba de magnitud.}
+
+Most of the guidance on false sharing comes from a small group of sources:
+processor vendors, the developers of the detection tools, and research
+prototypes evaluated by their own authors. Rather than taking that guidance at
+face value, this paper treats each recommendation as a claim to be tested. We
+pose three questions:
+\begin{enumerate}
+  \item \textbf{RQ1:} How much does placing independent counters in the same
+        cache line degrade performance and scalability on a contemporary
+        hybrid laptop processor?
+  \item \textbf{RQ2:} Which commonly cited claims about false sharing
+        (magnitude of the slowdown, need for 128-byte padding, reliability of
+        HITM-based detection) hold under our model and measurements, and which
+        depend on the context in which their sources were produced?
+  \item \textbf{RQ3:} What does mitigation cost in memory footprint, and when
+        is that cost worth paying?
+\end{enumerate}
+
+\todo{Contribuciones: (1) simulador MESI propio y abierto; (2) mediciones en
+i7-1260P con perf c2c; (3) contraste simulacion vs. hardware; (4) lectura
+critica de las fuentes. Ultimo parrafo: organizacion del paper.}
+
+% =====================================================================
+\section{Background}
+\label{sec:background}
+% =====================================================================
+
+\subsection{Coherence at Cache-Line Granularity}
+Private caches in a multicore processor are kept coherent by a hardware
+protocol. The unit tracked by the protocol is the cache line (64 bytes on
+current x86-64 processors~\cite{intel2024opt}), not the individual variable.
+Consequently, two variables that reside in the same line are treated by the
+hardware as a single shared object~\cite{hennessy2017ca,nagarajan2020primer}.
+
+\subsection{The MESI Protocol}
+\todo{Describir los 4 estados (M, E, S, I), las transacciones BusRd, BusRdX y
+BusUpgr, y una tabla o diagrama de transiciones. Fuentes: Hennessy--Patterson y
+Nagarajan et al. Aclarar que Intel usa una variante (MESIF) y que el detalle
+exacto no es publico.}
+
+\subsection{True Sharing vs. False Sharing}
+\todo{Definicion formal (Torrellas et al.): un fallo es de false sharing si la
+palabra que se invalida no es la que se usa. Condiciones: varios nucleos, misma
+linea, al menos una escritura~\cite{tang2023kernel}. Figura: 4 contadores de 8 B
+en una linea de 64 B.}
+
+\subsection{Detecting False Sharing with \texttt{perf c2c}}
+\todo{Que es un HITM (load que encuentra la linea en estado M en otra cache),
+como perf c2c lo muestrea y que reporta (lineas, offsets, nodos/CPUs)
+\cite{perf_c2c_man,mario2016c2c}. Anotar desde ya la limitacion: es muestreo y se
+basa en loads.}
+
+% =====================================================================
+\section{Related Work and Critical Review of Sources}
+\label{sec:related}
+% =====================================================================
+% Seccion clave para la discusion que pidio el profesor. Para cada fuente:
+% que afirma, quien la escribe y con que interes, sobre que hardware/carga,
+% y como lo ponemos a prueba nosotros. Distinguir: medido / estimado /
+% afirmado por el fabricante.
+
+\subsection{What the Sources Claim}
+\todo{Resumen breve de cada fuente: Torrellas 1994 (false sharing vs.
+localidad espacial y tamano de linea), Liu y Berger 2011 (SHERIFF), doc del
+kernel (patrones y mitigaciones), Mario 2016 (perf c2c), manual de Intel
+(recomendaciones de layout y prefetcher), Drepper 2007 (costo de coherencia).}
+
+\subsection{Who Wrote Them, and Under What Conditions}
+\todo{Para cada fuente, contexto y posible sesgo. Verificar cada punto contra
+la fuente antes de afirmarlo.}
+
+\begin{table}[!t]
+\caption{Critical Reading of the Main Sources}
+\label{tab:sources}
+\centering
+\footnotesize
+\begin{tabular}{@{}p{0.22\columnwidth}p{0.34\columnwidth}p{0.34\columnwidth}@{}}
+\toprule
+\textbf{Source} & \textbf{Context / possible bias} & \textbf{How we test it} \\
+\midrule
+Kernel docs~\cite{tang2023kernel} & Written by an Intel engineer; cases from large servers & Magnitude on a 4-P-core laptop \\
+Mario~\cite{mario2016c2c} & Co-author of the tool he documents & Detection under few or store-only accesses \\
+Intel manual~\cite{intel2024opt} & Vendor document; claims rarely quantified & 64\,B vs.\ 128\,B padding \\
+Drepper~\cite{drepper2007memory} & 2007 hardware & Whether costs still hold \\
+Torrellas~\cite{torrellas1994false} & Simulated 1990s bus machines & Line-size sweep in our simulator \\
+SHERIFF~\cite{liu2011sheriff} & Authors evaluate their own tool & \todo{revisar trabajos posteriores} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Methodology}
+\label{sec:method}
+% =====================================================================
+% La metodologia debe acordarse con el profesor (guia del curso).
+
+\subsection{Workload}
+Each of $N$ threads increments its own 64-bit counter $I$ times. No counter is
+ever read or written by another thread, so any coherence traffic between
+threads is, by construction, false sharing. Four data layouts are compared:
+\begin{itemize}
+  \item \textbf{packed:} counters stored contiguously (8\,B apart), so up to
+        eight counters share one 64-byte line;
+  \item \textbf{padded:} counters separated by a stride $s$ (64 or 128\,B),
+        so each occupies its own line;
+  \item \textbf{local:} each thread accumulates in a private variable and
+        writes the shared array once at the end;
+  \item \textbf{shared:} all threads increment the \emph{same} counter
+        (true sharing), used as a reference.
+\end{itemize}
+
+\subsection{Trace-Driven MESI Simulator}
+We implemented a MESI coherence simulator in C (available in the project
+repository, \texttt{sim/mesi\_sim.c}). Its model is deliberately simple so that
+every result can be traced to a protocol event:
+\begin{itemize}
+  \item $N$ cores, each with a private set-associative LRU cache;
+  \item a single, serialized snooping bus carrying BusRd, BusRdX and BusUpgr
+        transactions;
+  \item an atomic increment modeled as a read-for-ownership (BusRdX) followed
+        by a write, and, alternatively, as a separate load and store;
+  \item a per-core clock; at each step the core with the lowest clock issues
+        its next access, so contention emerges from timing instead of from a
+        fixed interleaving;
+  \item an optional \emph{adjacent-line prefetch} that, on a miss, also
+        fetches the other line of the aligned 128-byte pair.
+\end{itemize}
+The simulator counts hits, misses, bus transactions, invalidations,
+cache-to-cache transfers from a modified line (the analogue of a HITM),
+write-backs, and the memory occupied by the counters. Latencies are model
+parameters, not measurements (Table~\ref{tab:latencies}); their values are
+estimates and a sensitivity sweep is reported.
+
+\begin{table}[!t]
+\caption{Simulator Latency Parameters (Estimates, in Cycles)}
+\label{tab:latencies}
+\centering
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Event} & \textbf{Cycles} \\
+\midrule
+Private cache hit & 4 \\
+Data from LLC / clean copy & 40 \\
+Data from a modified line in another core (HITM) & 70 \\
+Main memory & 200 \\
+Upgrade (S$\rightarrow$M, invalidation only) & 30 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\todo{Justificar los valores de latencia con alguna fuente o con la medicion
+propia (p. ej. derivar la latencia HITM del experimento real) y aclarar que el
+bus serializado es una simplificacion: el i7-1260P usa un ring y una L3
+compartida.}
+
+Four sweeps are run (\texttt{sim/sweep.sh}): (i) scaling with $N$ for each
+layout; (ii) line size versus counter stride; (iii) adjacent-line prefetch with
+64-byte and 128-byte padding; and (iv) sensitivity to the HITM latency.
+
+\subsection{Hardware Experiment}
+\todo{Plataforma: Intel Core i7-1260P, 4 P-cores (HT) + 8 E-cores, L3 18 MiB,
+Linux \todo{kernel}. Hilos fijados con \texttt{taskset -c 0,2,4,6} (un hilo por
+nucleo fisico). Compilador y flags. Numero de repeticiones, media y desviacion.
+Grabacion con \texttt{perf c2c record} por layout. Opcional: E-cores de un
+mismo cluster (L2 compartida).}
+
+% =====================================================================
+\section{Results}
+\label{sec:results}
+% =====================================================================
+% Separar siempre: (A) simulado, (B) medido, (C) comparacion.
+
+\subsection{Simulation}
+\todo{Figura: ciclos por incremento vs. $N$ para los cuatro layouts
+(\texttt{results/sim/scaling.csv}). Tabla: linea vs. stride
+(\texttt{line\_vs\_stride.csv}). Resultado del prefetch
+(\texttt{prefetch.csv}). Sensibilidad (\texttt{hitm\_sensitivity.csv}).}
+
+\subsection{Measurements on the i7-1260P}
+\todo{Tiempo vs. hilos por layout (media $\pm$ desviacion), speedup, HITM de
+perf c2c por layout con los offsets de cada hilo.}
+
+\subsection{Simulation vs.\ Hardware}
+\todo{Donde coinciden y donde no. Las diferencias son material para la
+discusion.}
+
+% =====================================================================
+\section{Discussion}
+\label{sec:discussion}
+% =====================================================================
+% Aqui se responde RQ2. Cada punto: lo que dice la fuente, lo que vimos,
+% y por que podria diferir.
+
+\subsection{Is False Sharing as Costly as True Sharing?}
+\todo{En el modelo, packed y shared generan el mismo trafico. Comprobar en
+hardware y discutir que implica: para el hardware no existe diferencia.}
+
+\subsection{Does 128-Byte Padding Matter?}
+\todo{En el modelo, el prefetch de la linea adyacente solo provoca un evento
+aislado cuando los contadores ya estan en estado estable: la recomendacion de
+128 B dependeria de que haya fallos repetidos. Contrastar con el manual de Intel
+y con la medicion.}
+
+\subsection{Generalizing from Servers to a Hybrid Laptop}
+\todo{Las fuentes describen servidores con muchos nucleos; aqui hay 4 P-cores
+y una L3 compartida. Que cambia y que no.}
+
+\subsection{Limits of HITM-Based Detection}
+\todo{perf c2c muestrea loads; que pasa con patrones dominados por stores.}
+
+\subsection{The Cost of Mitigation}
+\todo{8 B vs. 64 B vs. 128 B por contador: 8x o 16x mas memoria, mas lineas de
+cache y presion de TLB. Cuando no vale la pena (contadores poco escritos).}
+
+\subsection{Threats to Validity}
+\todo{Simplificaciones del simulador, frecuencia variable/turbo, scheduler,
+microbenchmark como peor caso.}
+
+% =====================================================================
+\section{Conclusions}
+\label{sec:conclusions}
+% =====================================================================
+\todo{Responder RQ1--RQ3 en un parrafo cada una y dar guias practicas.}
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}

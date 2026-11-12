@@ -76,6 +76,7 @@ y el enfoque del experimento todavía pueden cambiar.
 | `benchmarks/fs.c` | Benchmark: contadores juntos (8 B) vs separados (64 B), 1–6 hilos, `volatile ++` |
 | `benchmarks/fs_atomic.c` | Igual, pero con incremento atómico (`__atomic_fetch_add`) |
 | `docs/Proyectos_Guia_temas_paper_ADC1_2026.pdf` | Guía oficial de temas y fechas |
+| `sim/mesi_sim.c` | Simulador MESI propio (N núcleos, bus snooping, layouts packed/padded/local/shared, prefetch adyacente). `make && ./sweep.sh` genera CSV en `results/sim/` |
 
 **Compilar el paper en Linux** (requiere `texlive-publishers` o
 `texlive-full`, que traen IEEEtran):
