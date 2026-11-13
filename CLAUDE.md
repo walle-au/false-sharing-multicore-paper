@@ -8,8 +8,8 @@ y el enfoque del experimento todavía pueden cambiar.
 
 - **Curso:** EL-4314 Arquitectura de Computadores I, TEC, II semestre 2026.
 - **Profesor:** Kervin Sánchez Herrera.
-- **Grupo:** GrupoAW (en los proyectos 1–3: Walter Alfaro Ulate  y
-  Allan Arrieta Quirós ). Confirmar quiénes van en el paper.
+- **Grupo:** GrupoAW (en los proyectos 1–3: Walter Alfaro Ulate y
+  Allan Arrieta Quirós). Confirmar quiénes van en el paper.
 - **Formato obligatorio:** inglés, LaTeX, plantilla IEEE Transactions (`IEEEtran`).
   Se entregan las fuentes LaTeX y el PDF por Tec Digital.
 - **Fechas:**
