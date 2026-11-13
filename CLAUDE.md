@@ -107,7 +107,7 @@ cd paper && pdflatex paper && bibtex paper && pdflatex paper && pdflatex paper
 | `mario2016c2c` | Blog de Joe Mario 2016 | Fuente del profe; cómo usar `perf c2c` y HITM |
 | `mario_c2c_files` | Repo `perf-c2c-usage-files` | Programa de ejemplo y reportes |
 | `perf_c2c_man` | Página de manual `perf-c2c(1)` | Definición oficial de la herramienta y de HITM |
-| `intel2024opt` | Intel Optimization Manual vol. 1, rev. 051 (may 2024) | False sharing en Intel, prefetcher de línea adyacente, núcleos híbridos |
+| `intel2024opt` | Intel Optimization Manual vol. 1, rev. 049 (dic 2023, doc. 248966-049US; PDF local en `docs/`, ignorado por git) | Sec. 3.11.5 false sharing + perf c2c (p. 3-78); streamer 128 B (p. 3-61); "separated by 128 bytes" (p. 11-9); umbral por defecto 64 B (p. 11-16) |
 | `drepper2007memory` | Drepper 2007 | Jerarquía de memoria y costo de la coherencia en multihilo |
 | `torrellas1994false` | IEEE TC 43(6):651–663, 1994, DOI 10.1109/12.286299 | Artículo clásico: false sharing vs localidad espacial |
 | `liu2011sheriff` | OOPSLA 2011, pp. 3–18, DOI 10.1145/2048066.2048070 | Detección y mitigación automática |

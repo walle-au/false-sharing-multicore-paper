@@ -269,9 +269,18 @@ a HITM, ``a load that hit in a modified cacheline,'' is ``the key that false
 sharing has occurred,'' and the report shows the offsets inside each contended
 line, which reveal different threads writing different words.
 
-\textbf{Intel's optimization manual}~\cite{intel2024opt} describes, among other
-prefetchers, a spatial prefetcher that tries to complete every line fetched into
-the L2 with its pair to form a 128-byte aligned chunk.
+\textbf{Intel's optimization manual}~\cite{intel2024opt} devotes a section to
+false sharing (Sec.~3.11.5), motivated by a two-socket Xeon system with 224
+hardware threads. It recommends \texttt{perf c2c}, stating that it ``directly
+measures the cache coherence overhead caused by false sharing,'' and it lists
+Mario's blog and the kernel documentation as further reading. On padding, the
+manual gives two answers. A summary of key practices says: ``Place each
+synchronization variable alone, separated by 128 bytes or in a separate cache
+line'' (p.~11-9), and the L2 streamer prefetcher fetches the pair line of an
+aligned 128-byte block on ``the first access to one of the two cache lines in
+this block while it is in memory'' (p.~3-61). The detailed procedure, however,
+sets the ``false-sharing threshold'' to the line size reported by CPUID, with
+a default of ``a safe value 64 bytes'' (p.~11-16).
 
 \subsection{Who Wrote Them, and Under What Conditions}
 None of these sources is suspect a priori, but each was written from a
@@ -296,10 +305,15 @@ particular position, which limits what its results can show.
         SHERIFF, for instance, ``cannot currently intercept atomic operations
         written in assembly'' and cannot detect a single writer with readers,
         and the \texttt{perf c2c} documentation does not mention hybrid CPUs.
-  \item \emph{Vendor documents.} The Intel manual describes mechanisms, but in
-        our reading it does not quantify when they cause false sharing; the
-        widespread advice to pad to 128 bytes comes mostly from practitioners
-        who infer it from the spatial prefetcher.
+  \item \emph{Vendor documents.} The Intel manual describes mechanisms but does
+        not quantify when they cause false sharing, and it recommends both
+        128 and 64 bytes in different chapters without saying which applies
+        to which processor. Its prefetcher description is written for the
+        Intel Core microarchitecture of 2006, not for current cores.
+  \item \emph{Independence.} The sources cite each other: the Intel manual
+        refers to Mario's blog and to the kernel documentation, which was
+        itself written by an Intel engineer. Their agreement is therefore
+        weaker evidence than it appears.
   \item \emph{Magnitude claims.} ``An order of magnitude'' (SHERIFF) and the
         Pentium~4 overheads (Drepper) come from worst-case loops, while
         Torrellas et al., measuring whole applications, found that false
@@ -320,7 +334,7 @@ Table~\ref{tab:sources} summarizes how we test each source.
 \midrule
 Kernel docs~\cite{tang2023kernel} & Intel author; large servers; no numbers & Magnitude on a laptop, 2--4 threads \\
 Mario~\cite{mario2016c2c} & Tool co-author; multi-socket servers & HITM detection on P- and E-cores \\
-Intel manual~\cite{intel2024opt} & Vendor; mechanism not quantified & 64\,B vs.\ 128\,B padding \\
+Intel manual~\cite{intel2024opt} & Vendor; server examples; 128\,B and 64\,B advice coexist & 64\,B vs.\ 128\,B padding; HITM on E-cores \\
 Drepper~\cite{drepper2007memory} & 2007 hardware; plain increments & Locked vs.\ plain increments today \\
 Torrellas~\cite{torrellas1994false} & Simulated 1990s bus machines & Line-size sweep in our simulator \\
 SHERIFF~\cite{liu2011sheriff} & Own tool, own benchmarks & Not tested; discussed only \\
@@ -578,21 +592,23 @@ increments. Verifying either would require counters that we have not
 collected; we report the discrepancy as an open observation.
 
 \subsection{Does 128-Byte Padding Matter?}
-Intel describes a spatial prefetcher that completes the aligned 128-byte pair
-of a fetched line~\cite{intel2024opt}, and practitioners often recommend padding
-to 128 bytes for that reason. \todo{Ubicar la frase exacta en la rev.~051 del
-manual (seccion ``Data Prefetching'') y anotar la pagina.}
+Intel's manual recommends separating synchronization variables by 128 bytes,
+and its L2 streamer fetches the pair line of an aligned 128-byte
+block~\cite{intel2024opt}; practitioners often recommend 128-byte padding for
+that reason. The same manual, however, defaults to 64 bytes elsewhere.
 In our measurements, 128-byte padding was within 5\% of 64-byte padding in
-every configuration, and slightly slower in some. The simulator suggests why:
-the prefetcher acts only on misses, and once each core owns its padded line in
-state M it never misses again, so the neighboring line is fetched at most once
-during warm-up (one to four events per run). The recommendation is therefore
+every configuration, and slightly slower in some. The simulator suggests why,
+and the manual's own wording agrees: the streamer is triggered by an access to
+a line ``while it is in memory,'' that is, on a miss. Once each core owns its
+padded line in state M it never misses again, so the neighboring line is
+fetched at most once during warm-up (one to four events per run). The recommendation is therefore
 not wrong but conditional: it should matter when the contended lines are
 repeatedly evicted or re-fetched, for example when the counters are mixed with
 other data that miss in the cache. For a tight update loop such as ours, it
-doubles the memory cost without a measurable benefit. A vendor manual states
-the mechanism but, in our reading, does not quantify when the extra padding pays
-off; our results show that it is a workload-dependent decision.
+doubles the memory cost without a measurable benefit. The manual states the
+mechanism but does not quantify when the extra padding pays off, and its two
+recommendations are not reconciled; our results show that it is a
+workload-dependent decision.
 
 \subsection{The Classic \texttt{volatile} Demonstration Can Hide the Problem}
 Many explanations of false sharing, including our own first prototype, use a
@@ -647,8 +663,10 @@ any core group, although on E-cores it is up to $5.5\times$ slower than padded.
 This is the most dangerous combination: a real cost that the tool does not
 show.
 
-We do not claim that the tool is wrong; it reports what the sampling hardware
-provides. But its effectiveness depends on the core type and on the access
+This qualifies Intel's statement that the tool ``directly measures'' the
+coherence overhead~\cite{intel2024opt}: it measures a sample of loads, and on
+E-cores that sample is small. We do not claim that the tool is wrong; it
+reports what the sampling hardware provides. But its effectiveness depends on the core type and on the access
 pattern, and that dependence is not visible to the user. The fact that the
 author of the documentation is also a co-author of the tool is not, by itself,
 evidence of bias; what our data show is that its description was written for

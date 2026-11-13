@@ -25,3 +25,6 @@ perf.data.old
 .vscode/
 *.swp
 .DS_Store
+
+# Third-party PDFs (copyrighted, large)
+docs/248966-*.pdf
